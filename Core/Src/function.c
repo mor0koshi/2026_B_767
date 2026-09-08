@@ -7,6 +7,7 @@
  */
 /* USER CODE END Header */
 #include "function.h"
+#include "lidar_sensor.h" /* safety() で lidar_timeout() を使用するため */
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -195,16 +196,16 @@ void roller(void){
             stop_flag = 0;
             timer_flag = 0;
             pwm7 = 0;
-        if(Ltuno == 1){
-             motor_control(ROLLER_SPEED, PV5, 20, 20, 900, &pwm5, &dummy, &rem5);
-            motor_control(ROLLER_SPEED, PV6, 20, 20, 900, &pwm6, &dummy, &rem6);
-        }
-
-            else if(Ltuno == -1  ) {
+            if(Ltuno == 1){
+                motor_control(ROLLER_SPEED, PV5, 20, 20, 900, &pwm5, &dummy, &rem5);
+                motor_control(ROLLER_SPEED, PV6, 20, 20, 900, &pwm6, &dummy, &rem6);
+            } else if(Ltuno == 0){
+                motor_control(ROLLER_STOP, PV5, 20, 20, 900, &pwm5, &dummy, &rem5);
+                motor_control(ROLLER_STOP, PV6, 20, 20, 900, &pwm6, &dummy, &rem6);
+            } else if(Ltuno == -1  ) {
                 roller_dir = 0; // 正転
                 motor_control(BAKETU_ROLLER_SPEED, PV5, 20, 20, 900, &pwm5, &dummy, &rem5);
                 motor_control(BAKETU_ROLLER_SPEED, PV6, 20, 20, 900, &pwm6, &dummy, &rem6);
-
             }
             break;
 
@@ -252,10 +253,12 @@ static PID angle = {0.6, 0.01, 0.2, 0, 0};
     float error_angle = distance1 - distance2;        // 角度のズレ
 
     // --- モード切替時のリセット処理 ---
+    // ゲイン(Ki)ではなく積分値(integral)を消すこと。
+    // Ki を 0 にすると static なので電源を切るまで I 制御が復活しない。
     if (reset_flag == 1) {
-        distance.Ki = 0;
+        distance.integral = 0;
         distance.prev_error = error_dist;
-        angle.Ki = 0;
+        angle.integral = 0;
         angle.prev_error = error_angle;
         auto_ly = 0; auto_rx = 0;
         return;
@@ -289,7 +292,8 @@ void safety(void) {
   int can_error = 0;
   uint8_t blink_state = (now / 300) % 2;
 
-  if(SBUS_CH[0] == 0 || SBUS_LostFrame){
+  // Failsafe は「受信機が送信機を見失った」決定的な信号なので必ず見る
+  if(SBUS_CH[0] == 0 || SBUS_LostFrame || SBUS_Failsafe){
     sbus_error = 1;
   }else{
     sbus_error = 0;
@@ -309,7 +313,12 @@ void safety(void) {
         pwm6 = 0;
         pwm7 = 0;
         pwm8 = 0;
-    } else {// 両方とも正常な場合は緑点灯
+    } else if(lidar_timeout()){
+        // 操縦はできるが自動モードが使えない状態。緑を点滅させて知らせる
+        HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, blink_state);//green
+        HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, 0);//blue
+        HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, 0);//red
+    } else {// 全て正常な場合は緑点灯
         HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, 1);//green
         HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, 0);//blue
         HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, 0);//red

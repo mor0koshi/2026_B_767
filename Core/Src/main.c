@@ -316,15 +316,22 @@ int main(void)
     
     // 足回り
    if (now - time1 >= 20) {
-      if(Rtuno == 1) {
-        // 手動モード
-        auto_mode(distance4 ,distance7, 1,1000); // ★追加：裏でPIDの記憶をリセットしておく
+      // Lidarが死んでいると auto_mode は「壁まで遠すぎる」と誤認して全速で走り続ける。
+      // 測定値が途絶えている間は自動系を止め、手動モードとして扱う。
+      int lidar_ng = lidar_timeout();
+
+      if(Rtuno == 1 || lidar_ng) {
+        // 手動モード（Lidar異常時もここに落ちる）
+        // ★裏でPIDの記憶をリセットしておく。
+        //   引数は全自動モードと必ず同じにすること（違うと切替時にD項が跳ねる）
+        auto_mode(distance4 - LIDAR_OFFSET4, distance7 - LIDAR_OFFSET7, 1, AUTO_TARGET_DIST_MM);
         motor_control(m1, PV1, maxmv, maxmv, maxpwm, &pwm1, &dir1, &rem1);
         motor_control(m2, PV2, maxmv, maxmv, maxpwm, &pwm2, &dir2, &rem2);
         motor_control(m3, PV3, maxmv, maxmv, maxpwm, &pwm3, &dir3, &rem3);
         motor_control(m4, PV4, maxmv, maxmv, maxpwm, &pwm4, &dir4, &rem4);
       } else if(Rtuno == 0){
-        auto_mode(distance4 - 11, distance7 - 38, 0,(distance4  + distance7 -49) / 2); 
+        auto_mode(distance4 - LIDAR_OFFSET4, distance7 - LIDAR_OFFSET7, 0,
+                  (distance4 + distance7 - (LIDAR_OFFSET4 + LIDAR_OFFSET7)) / 2);
         int gauto_m1 =  ly - lx + auto_rx;
         int gauto_m2 = -ly - lx + auto_rx;
         int gauto_m3 = -ly + lx + auto_rx;
@@ -337,7 +344,7 @@ int main(void)
 
       }else if(Rtuno == -1) {
         // 自動モード
-        auto_mode(distance4 + -11, distance7 - 38, 0,500); // ★修正：通常計算
+        auto_mode(distance4 - LIDAR_OFFSET4, distance7 - LIDAR_OFFSET7, 0, AUTO_TARGET_DIST_MM);
 
         // 自動計算された ly, rx を使って m1〜m4 を計算（あなたの式を再利用！）
         int auto_m1 =  -auto_ly - lx + auto_rx;
@@ -374,7 +381,8 @@ int main(void)
 
 
     // デバッグ用のprintf、100msごとに出力
-    uint32_t time = 0;
+    // static を外すと毎周回 0 に初期化され、条件が常に真になって毎周期送信になる
+    static uint32_t time = 0;
     if (HAL_GetTick() - time >= 100) {
       //printf("data0:%d data1:%d data2:%d data3:%d data4:%d data5:%d data6:%d data7:%d\n", use_data[0], use_data[1], use_data[2], use_data[3], use_data[4], use_data[5], use_data[6], use_data[7]); 
        //printf("0:%d 1:%d 2:%d 3:%d 4:%d 5:%d 6:%d 7:%d\n", sbus0, sbus1, sbus2, sbus3 ,SBUS_CH[4], SBUS_CH[5], SBUS_CH[6], SBUS_CH[7]);

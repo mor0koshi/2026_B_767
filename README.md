@@ -7,9 +7,9 @@ STM32F767ZI（Nucleo-144系ボード）をベースにした、オムニ/メカ�
 - **駆動方式**: 4輪メカナム駆動（前左/前右/後左/後右）
 - **操作入力**: SBUS（RCプロポ、UART5、100000bps / 偶数パリティ / ストップビット2、信号反転）
 - **外部連携**: CANバス（CAN1）で外部ノードから8バイトのコマンド/フィードバックを受信
-- **センサー**: TF-Luna系Lidar距離センサー×2（UART4・UART7、DMA受信）による壁沿い自動追従
+- **センサー**: PONO TSD20 単点ToF Lidar×2（UART4・UART7、460800bps、DMA受信）による壁沿い自動追従
 - **アクチュエータ**: 駆動モーター4基（TIM4）＋ローラー/付属モーター4基（TIM1）、電磁弁2系統
-- **安全機構**: SBUS/CANの信号断検知による緊急停止、駆動とローラーの同時動作インターロック、ステータスLED
+- **安全機構**: SBUS/CANの信号断検知による緊急停止、Lidar途絶時の自動モード禁止、駆動とローラーの同時動作インターロック、ステータスLED
 
 ## 走行モード（`Rtuno`スイッチで切替）
 
@@ -18,6 +18,8 @@ STM32F767ZI（Nucleo-144系ボード）をベースにした、オムニ/メカ�
 | `1` | 手動モード | ジョイスティック入力（`m1`〜`m4`）をそのままモーターへ出力 |
 | `0` | CAN補正モード | Lidar PIDによる回頭補正（`auto_rx`）とジョイスティックを合成 |
 | `-1` | 全自動モード | 2つのLidar距離から前後（`auto_ly`）・回頭（`auto_rx`）を自動算出し、目標距離500mmで壁に対して平行かつ一定距離を保持 |
+
+**Lidarの測定値が100ms以上途絶えている間は、`Rtuno`の値によらず手動モードとして動作する。** 距離が0や古い値のまま自動制御を続けると、PIDが「壁まで遠すぎる」と誤認してPWM上限まで加速し続けるため。復帰すると自動的に元のモードに戻る。
 
 ## ローラー機構（`Lmayu` / `Ltuno`スイッチで切替）
 
@@ -62,6 +64,7 @@ STM32F767ZI（Nucleo-144系ボード）をベースにした、オムニ/メカ�
 | `distance4, distance7` | Lidarセンサー1（UART4）・2（UART7）が計測した距離（mm） |
 | `auto_ly, auto_rx` | Lidar PID（`auto_mode`）が算出する仮想ジョイスティック出力（前後・回頭） |
 | `last_can_rx` | 最後にCANを受信した時刻。CAN断線検知に使用 |
+| `last_lidar_rx4/7` | 最後に有効なLidarフレームを受信した時刻（`lidar_sensor.c`内で保持）。チェックサムが通り距離が有効範囲のときだけ更新する |
 | `SBUS_CH[16]`, `SBUS_Failsafe`, `SBUS_LostFrame` | SBUSデコード結果と信号異常フラグ |
 
 ## 主要関数
@@ -72,12 +75,13 @@ STM32F767ZI（Nucleo-144系ボード）をベースにした、オムニ/メカ�
 | `roller(void)` | function.c | ローラー機構のステートマシン。`Lmayu`/`Ltuno`とリミットスイッチに応じてローラー・スピン動作を制御 |
 | `auto_mode(distance1, distance2, reset_flag, target_dist)` | function.c | 2つのLidar値からPID制御で前後（距離維持）・回頭（平行維持）指令を算出 |
 | `safety(void)` | function.c | SBUS/CAN信号断の監視、緊急停止（全PWM0）、駆動とローラーの同時動作禁止インターロック、ステータスLED制御 |
+| `lidar_timeout(void)` | lidar_sensor.c | どちらかのLidarが`LIDAR_TIMEOUT_MS`(100ms)以上有効な測定値を返していなければ1を返す。自動モードのゲートとLED表示に使用 |
 | `CAN_TX(recipient)` | function.c | CAN送信関数（現状は固定ペイロードで、メインループからは未使用。今後の拡張用スタブ） |
 | `HAL_CAN_RxFifo0MsgPendingCallback` | function.c | CAN受信割り込み。StdId `0x001`・DLC≥8のフレームを`use_data[]`へ格納 |
 | `sbus(void)` | sbus_handler.c | SBUS入力をスイッチ/スティック値に変換し、メカナムミックス`m1〜m4`を計算 |
 | `get_switch_state(ch_value)` | sbus_handler.c | SBUSチャンネル値を3段階スイッチ状態（-1/0/1）に変換 |
 | `process_stick(ch_value)` | sbus_handler.c | SBUSチャンネル値をスティック値（-1000〜1000）に変換（デッドバンド付き） |
-| `lidar(void)` | lidar_sensor.c | DMAリングバッファからLidarの距離データフレーム（ヘッダ`0x5C`）を検出・パース |
+| `lidar(void)` | lidar_sensor.c | DMAリングバッファからTSD20の4バイトフレーム（`5C` / 距離LSB / 距離MSB / チェックサム）を検出・検証・パース。チェックサム不一致は棄却し1バイト進めて再同期する |
 
 ## SBUSチャンネル割り当て
 
@@ -94,9 +98,10 @@ STM32F767ZI（Nucleo-144系ボード）をベースにした、オムニ/メカ�
 
 ## 安全機構
 
-- SBUS信号断（`SBUS_CH[0]==0`または`SBUS_LostFrame`）、またはCAN受信断（最終受信から100ms以上経過）を検知すると、全PWM出力を強制的に0にする。
+- SBUS信号断（`SBUS_CH[0]==0` / `SBUS_LostFrame` / `SBUS_Failsafe`）、またはCAN受信断（最終受信から100ms以上経過）を検知すると、全PWM出力を強制的に0にする。
 - ローラーモーター（`pwm5`/`pwm6`）が動作中は、駆動輪モーター（`pwm1〜4`）を強制的に0にするインターロックあり。
-- ステータスLED3基で状態表示：正常時は緑点灯、SBUS断で青点滅、CAN断で赤点滅。
+- Lidarの測定値が100ms以上途絶えると自動モードを禁止し、手動操縦のみ受け付ける（走行は継続できる）。
+- ステータスLED3基で状態表示：正常時は緑点灯、Lidar途絶（操縦のみ可）で緑点滅、SBUS断で青点滅、CAN断で赤点滅。
 
 ## ハードウェア構成（.iocより）
 
