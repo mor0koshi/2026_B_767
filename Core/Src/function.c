@@ -60,33 +60,52 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan1) {
     }
 }
 
-void motor_control(int SV,int PV,int maxMV ,int down_pwm,int max_pwm,int *pwmm,int *dirr) {
-
+/*
+ * 速度制御 (積分制御)
+ *
+ * 積分器は pwm 自身。毎周期 pwm に MV(=誤差の1/10) を足し込むことで、
+ * 誤差が 0 になるまで pwm が育っていく。
+ *
+ * remm は「積分項」ではなく、error/10 の整数除算で切り捨てられる端数の
+ * 繰り越し(キャリー)。|rem| は必ず 10 未満に収まり、蓄積はしない。
+ * これが無いと |error| < 10 の領域で MV が常に 0 になり、pwm が動かず
+ * 定常偏差が残ったままになる。端数を持ち越すことでその不感帯を解消する。
+ *
+ * なお MV が maxMV で頭打ちになる場合、はみ出した分は繰り越さずに捨てる。
+ * これは1周期あたりの変化量を制限するため(積分ワインドアップ防止)で、
+ * キャリーが効くのは飽和していない = 定常付近の領域だけになる。
+ */
+void motor_control(int SV, int PV, int maxMV, int down_pwm,
+                   int max_pwm, int *pwmm, int *dirr, int *remm)
+{
     int error = 0;
     int MV = 0;
     int lastMV = 0;
-    int pwm = *pwmm; //前回の値を保持
+    int pwm = *pwmm;
     int target_dir = 0;
-    int dir = *dirr; //前回の値を保持
+    int dir = *dirr;
+    int rem = *remm;          // 前回の端数を復元
 
     // リミッター処理
     if (SV > max_pwm) {
         SV = max_pwm;
-    }else if (SV < -max_pwm) {
+    } else if (SV < -max_pwm) {
         SV = -max_pwm;
     }
 
-    // dir設定と値を絶対値にしている
-
+    // dir設定と絶対値化
     if (SV < 0) {
         target_dir = 0;
         SV = -SV;
     } else if (SV > 0) {
         target_dir = 1;
     }
+
     error = SV - PV;
 
-    MV =  error / 10;//ki=0.1
+    rem += error;             // ① 今回の誤差に前回の端数を足す
+    MV   = rem / 10;          // ② 10 で割れるぶんだけ操作量にする(Ki=0.1)
+    rem -= MV * 10;           // ③ 使ったぶんを引き、端数(|rem| < 10)だけ残す
 
     if (MV > maxMV) {
         lastMV = maxMV;
@@ -96,9 +115,10 @@ void motor_control(int SV,int PV,int maxMV ,int down_pwm,int max_pwm,int *pwmm,i
         lastMV = MV;
     }
 
-    // モーターの回転方向が目標と異なる場合一旦pwmが0になってから回転方向を変える
+    // 回転方向が目標と異なる場合、一旦 pwm を 0 まで落としてから方向を変える
     if (SV != 0) {
         if (dir != target_dir) {
+            rem = 0;                      // 方向転換中は端数を捨てる
             if (pwm > down_pwm) {
                 pwm -= down_pwm;
             } else {
@@ -112,25 +132,24 @@ void motor_control(int SV,int PV,int maxMV ,int down_pwm,int max_pwm,int *pwmm,i
             }
         }
     }
-    // PWMの値が0~maxpwmの範囲を超えないようにする
+
     if (pwm > max_pwm) {
         pwm = max_pwm;
-    } else if (pwm < 0) {
-        pwm = 0;
     }
-    // コントローラーの値が0の時に緩やかにモーターの停止
+
+    // 指令値が 0 のときは緩やかにモーターを停止させる
     if (SV == 0) {
+        rem = 0;                          // 停止指令中は端数を捨てる
         if (pwm > down_pwm) {
-          pwm -= down_pwm;
+            pwm -= down_pwm;
         } else {
-          pwm = 0;
+            pwm = 0;
         }
     }
 
-    // pwmの値を正の値に変換
-    pwm = abs(pwm);
     *pwmm = pwm;
     *dirr = dir;
+    *remm = rem;
 }
 
 // マジックナンバーを意味のある定数に置き換えます
@@ -141,32 +160,33 @@ static const int ROLLER_SPIN_NORMAL_PWM = 300;
 static const int ROLLER_SPIN_REVERSE_PWM = 500;
 
 uint32_t time3 = 0;
+uint32_t time4 = 0; 
 void roller(void){
     switch (Lmayu) {
         case 1:
             if ((Ltuno == 1 && stop_flag == 0) ) {
                 roller_dir = 0; // 正転
                 pwm7 = ROLLER_SPIN_NORMAL_PWM;
-                motor_control(ROLLER_SPEED, PV5, 20, 20, 900, &pwm5, &dummy);
-                motor_control(ROLLER_SPEED, PV6, 20, 20, 900, &pwm6, &dummy);
+                motor_control(ROLLER_SPEED, PV5, 20, 20, 900, &pwm5, &dummy, &rem5);
+                motor_control(ROLLER_SPEED, PV6, 20, 20, 900, &pwm6, &dummy, &rem6);
             } else if((Ltuno == -1 && stop_flag == 0) ) {
                 roller_dir = 0; // 正転
                 pwm7 = ROLLER_SPIN_NORMAL_PWM;
-                motor_control(BAKETU_ROLLER_SPEED, PV5, 20, 20, 900, &pwm5, &dummy);
-                motor_control(BAKETU_ROLLER_SPEED, PV6, 20, 20, 900, &pwm6, &dummy);
+                motor_control(BAKETU_ROLLER_SPEED, PV5, 20, 20, 900, &pwm5, &dummy, &rem5);
+                motor_control(BAKETU_ROLLER_SPEED, PV6, 20, 20, 900, &pwm6, &dummy, &rem6);
 
             } else if((Ltuno == 0 && stop_flag == 0) ) {
                 pwm7 = 0;
-                motor_control(ROLLER_STOP, PV5, 20, 20, 900, &pwm5, &dummy);
-                motor_control(ROLLER_STOP, PV6, 20, 20, 900, &pwm6, &dummy);
+                motor_control(ROLLER_STOP, PV5, 20, 20, 900, &pwm5, &dummy, &rem5);
+                motor_control(ROLLER_STOP, PV6, 20, 20, 900, &pwm6, &dummy, &rem6);
             } else if(stop_flag == 1){
                 if(timer_flag == 0){
                     timer_flag  = 1;
                     time3 = now;
                 }if(now-time3 >= 800){
                 pwm7 = 0;
-                motor_control(ROLLER_STOP, PV5, 20, 20, 900, &pwm5, &dummy);
-                motor_control(ROLLER_STOP, PV6, 20, 20, 900, &pwm6, &dummy);
+                motor_control(ROLLER_STOP, PV5, 20, 20, 900, &pwm5, &dummy, &rem5);
+                motor_control(ROLLER_STOP, PV6, 20, 20, 900, &pwm6, &dummy, &rem6);
                 }   
             }
             break;
@@ -176,14 +196,14 @@ void roller(void){
             timer_flag = 0;
             pwm7 = 0;
         if(Ltuno == 1){
-             motor_control(ROLLER_SPEED, PV5, 20, 20, 900, &pwm5, &dummy);
-            motor_control(ROLLER_SPEED, PV6, 20, 20, 900, &pwm6, &dummy);
+             motor_control(ROLLER_SPEED, PV5, 20, 20, 900, &pwm5, &dummy, &rem5);
+            motor_control(ROLLER_SPEED, PV6, 20, 20, 900, &pwm6, &dummy, &rem6);
         }
 
             else if(Ltuno == -1  ) {
                 roller_dir = 0; // 正転
-                motor_control(BAKETU_ROLLER_SPEED, PV5, 20, 20, 900, &pwm5, &dummy);
-                motor_control(BAKETU_ROLLER_SPEED, PV6, 20, 20, 900, &pwm6, &dummy);
+                motor_control(BAKETU_ROLLER_SPEED, PV5, 20, 20, 900, &pwm5, &dummy, &rem5);
+                motor_control(BAKETU_ROLLER_SPEED, PV6, 20, 20, 900, &pwm6, &dummy, &rem6);
 
             }
             break;
@@ -191,18 +211,23 @@ void roller(void){
       case -1:
             stop_flag = 0;
             timer_flag = 0;
-            motor_control(ROLLER_STOP, PV5, 20, 20, 900, &pwm5, &dummy);
-            motor_control(ROLLER_STOP, PV6, 20, 20, 900, &pwm6, &dummy);
+            motor_control(ROLLER_STOP, PV5, 20, 20, 900, &pwm5, &dummy, &rem5);
+            motor_control(ROLLER_STOP, PV6, 20, 20, 900, &pwm6, &dummy, &rem6);
             break;     
     }
     if (reset_flag == 1 && set_flag == 0) {
+        reset_flag = 0;
+        set_flag = 1;
+        time4 = now;
+    }
+       if(now - time4 <= 2000 && set_flag == 1){
         pwm7 = ROLLER_SPIN_REVERSE_PWM;
         roller_dir = 1; // 逆転
-       } else if(set_flag == 1 && reset_flag ==  1){
+       }else if(now - time4 > 2000 && set_flag == 1){
         pwm7 = 0;
-        reset_flag = 0;
         set_flag = 0;
-        }
+       }
+
 
 }
 
@@ -284,7 +309,7 @@ void safety(void) {
         pwm6 = 0;
         pwm7 = 0;
         pwm8 = 0;
-    } else if(sbus_error == 1 && can_error == 1){
+    } else {// 両方とも正常な場合は緑点灯
         HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, 1);//green
         HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, 0);//blue
         HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, 0);//red

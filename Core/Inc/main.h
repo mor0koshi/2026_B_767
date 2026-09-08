@@ -83,6 +83,8 @@ void Error_Handler(void);
 #define d1_GPIO_Port GPIOB
 #define d2_Pin GPIO_PIN_2
 #define d2_GPIO_Port GPIOB
+#define lock9_Pin GPIO_PIN_11
+#define lock9_GPIO_Port GPIOF
 #define d7_Pin GPIO_PIN_12
 #define d7_GPIO_Port GPIOF
 #define d8_Pin GPIO_PIN_13
@@ -121,10 +123,10 @@ void Error_Handler(void);
 #define lock1_GPIO_Port GPIOG
 #define lock4_Pin GPIO_PIN_5
 #define lock4_GPIO_Port GPIOG
-#define USB_PowerSwitchOn_Pin GPIO_PIN_6
-#define USB_PowerSwitchOn_GPIO_Port GPIOG
-#define USB_OverCurrent_Pin GPIO_PIN_7
-#define USB_OverCurrent_GPIO_Port GPIOG
+#define lock2_Pin GPIO_PIN_6
+#define lock2_GPIO_Port GPIOG
+#define lock3_Pin GPIO_PIN_7
+#define lock3_GPIO_Port GPIOG
 #define lock6_Pin GPIO_PIN_8
 #define lock6_GPIO_Port GPIOG
 #define USB_SOF_Pin GPIO_PIN_8

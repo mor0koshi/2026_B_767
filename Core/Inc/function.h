@@ -25,6 +25,15 @@ extern int pwm5;
 extern int pwm6;
 extern int pwm7;
 extern int pwm8;
+extern int rem1;
+extern int rem2;
+extern int rem3;
+extern int rem4;
+extern int rem5;
+extern int rem6;
+extern int rem7;
+extern int rem8;
+
 
 extern int stop_flag;
 extern int timer_flag;
@@ -48,7 +57,7 @@ int _write(int file, char *ptr, int len);
 
 void CAN_TX(uint32_t recipient);
 
-void motor_control(int SV, int PV, int maxMV, int down_pwm, int max_pwm, int *pwmm, int *dirr);
+void motor_control(int SV, int PV, int maxMV, int down_pwm, int max_pwm, int *pwmm, int *dirr,int *remm);
 
 void roller(void);
 void auto_mode(int distance1, int distance2, int reset_flag, int target_dist);

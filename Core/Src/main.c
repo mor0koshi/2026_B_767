@@ -131,6 +131,15 @@ int pwm6 = 0;
 int pwm7 = 0;
 int pwm8 = 0;
 
+int rem1 = 0;
+int rem2 = 0;
+int rem3 = 0;
+int rem4 = 0;
+int rem5 = 0;
+int rem6 = 0;
+int rem7 = 0;
+int rem8 = 0;
+
 int maxpwm = (1000 * 7) / 10; // 最大PWM値を0.7倍にして減速させる
 //int test;
 
@@ -143,6 +152,7 @@ int set_flag = 0;
 
 int roller_dir = 0; // ローラーの回転方向を保持する変数
 
+// ローラーは常に正転で方向転換しないため、dirの受け皿は共用の捨て変数でよい
 int dummy = 0;
 
 //lidar
@@ -301,9 +311,7 @@ int main(void)
         if(HAL_GPIO_ReadPin(lock7_GPIO_Port, lock7_Pin) == 0){
           reset_flag = 1;
         }
-        if(HAL_GPIO_ReadPin(lock8_GPIO_Port, lock8_Pin) == 0){
-          set_flag = 1;
-        }
+        
 
     
     // 足回り
@@ -311,10 +319,10 @@ int main(void)
       if(Rtuno == 1) {
         // 手動モード
         auto_mode(distance4 ,distance7, 1,1000); // ★追加：裏でPIDの記憶をリセットしておく
-        motor_control(m1, PV1, maxmv, maxmv, maxpwm, &pwm1, &dir1);
-        motor_control(m2, PV2, maxmv, maxmv, maxpwm, &pwm2, &dir2);
-        motor_control(m3, PV3, maxmv, maxmv, maxpwm, &pwm3, &dir3);
-        motor_control(m4, PV4, maxmv, maxmv, maxpwm, &pwm4, &dir4);
+        motor_control(m1, PV1, maxmv, maxmv, maxpwm, &pwm1, &dir1, &rem1);
+        motor_control(m2, PV2, maxmv, maxmv, maxpwm, &pwm2, &dir2, &rem2);
+        motor_control(m3, PV3, maxmv, maxmv, maxpwm, &pwm3, &dir3, &rem3);
+        motor_control(m4, PV4, maxmv, maxmv, maxpwm, &pwm4, &dir4, &rem4);
       } else if(Rtuno == 0){
         auto_mode(distance4 - 11, distance7 - 38, 0,(distance4  + distance7 -49) / 2); 
         int gauto_m1 =  ly - lx + auto_rx;
@@ -322,10 +330,10 @@ int main(void)
         int gauto_m3 = -ly + lx + auto_rx;
         int gauto_m4 =  ly + lx + auto_rx;
 
-        motor_control(gauto_m1, PV1, maxmv, maxmv, maxpwm, &pwm1, &dir1);
-        motor_control(gauto_m2, PV2, maxmv, maxmv, maxpwm, &pwm2, &dir2);
-        motor_control(gauto_m3, PV3, maxmv, maxmv, maxpwm, &pwm3, &dir3);
-        motor_control(gauto_m4, PV4, maxmv, maxmv, maxpwm, &pwm4, &dir4);
+        motor_control(gauto_m1, PV1, maxmv, maxmv, maxpwm, &pwm1, &dir1, &rem1);
+        motor_control(gauto_m2, PV2, maxmv, maxmv, maxpwm, &pwm2, &dir2, &rem2);
+        motor_control(gauto_m3, PV3, maxmv, maxmv, maxpwm, &pwm3, &dir3, &rem3);
+        motor_control(gauto_m4, PV4, maxmv, maxmv, maxpwm, &pwm4, &dir4, &rem4);
 
       }else if(Rtuno == -1) {
         // 自動モード
@@ -338,10 +346,10 @@ int main(void)
         int auto_m4 =  -auto_ly + lx + auto_rx;
 
         // 計算結果をモーターに出力
-        motor_control(auto_m1, PV1, maxmv, maxmv, maxpwm, &pwm1, &dir1);
-        motor_control(auto_m2, PV2, maxmv, maxmv, maxpwm, &pwm2, &dir2);
-        motor_control(auto_m3, PV3, maxmv, maxmv, maxpwm, &pwm3, &dir3);
-        motor_control(auto_m4, PV4, maxmv, maxmv, maxpwm, &pwm4, &dir4);
+        motor_control(auto_m1, PV1, maxmv, maxmv, maxpwm, &pwm1, &dir1, &rem1);
+        motor_control(auto_m2, PV2, maxmv, maxmv, maxpwm, &pwm2, &dir2, &rem2);
+        motor_control(auto_m3, PV3, maxmv, maxmv, maxpwm, &pwm3, &dir3, &rem3);
+        motor_control(auto_m4, PV4, maxmv, maxmv, maxpwm, &pwm4, &dir4, &rem4);
       }
 
       roller();
@@ -989,7 +997,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(d4_GPIO_Port, d4_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOG, lock1_Pin|lock4_Pin|USB_PowerSwitchOn_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOG, lock1_Pin|lock4_Pin|lock2_Pin|lock3_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : USER_Btn_Pin */
   GPIO_InitStruct.Pin = USER_Btn_Pin;
@@ -1013,6 +1021,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : lock9_Pin */
+  GPIO_InitStruct.Pin = lock9_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(lock9_GPIO_Port, &GPIO_InitStruct);
+
   /*Configure GPIO pin : d3_Pin */
   GPIO_InitStruct.Pin = d3_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
@@ -1027,18 +1041,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(d4_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : lock1_Pin lock4_Pin USB_PowerSwitchOn_Pin */
-  GPIO_InitStruct.Pin = lock1_Pin|lock4_Pin|USB_PowerSwitchOn_Pin;
+  /*Configure GPIO pins : lock1_Pin lock4_Pin lock2_Pin lock3_Pin */
+  GPIO_InitStruct.Pin = lock1_Pin|lock4_Pin|lock2_Pin|lock3_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : USB_OverCurrent_Pin */
-  GPIO_InitStruct.Pin = USB_OverCurrent_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(USB_OverCurrent_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : lock6_Pin lock7_Pin */
   GPIO_InitStruct.Pin = lock6_Pin|lock7_Pin;
