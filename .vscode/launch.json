@@ -16,7 +16,7 @@
             "runEntry": "main",
             "imagesAndSymbols": [
                 {
-                    "imageFileName": "${workspaceFolder}/build/Debug/can_test_TX.elf"
+                    "imageFileName": "${workspaceFolder}/build/Debug/2026_B_767.elf"
                 }
             ]
         }
