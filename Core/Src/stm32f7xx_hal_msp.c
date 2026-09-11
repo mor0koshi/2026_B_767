@@ -28,6 +28,8 @@ extern DMA_HandleTypeDef hdma_uart5_rx;
 
 extern DMA_HandleTypeDef hdma_uart7_rx;
 
+extern DMA_HandleTypeDef hdma_uart8_rx;
+
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN TD */
 
@@ -63,7 +65,7 @@ extern DMA_HandleTypeDef hdma_uart7_rx;
 /* USER CODE END 0 */
 
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
-                                        /**
+                                                            /**
   * Initializes the Global MSP.
   */
 void HAL_MspInit(void)
@@ -303,6 +305,29 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* htim_base)
 
 }
 
+/**
+  * @brief TIM_PWM MSP Initialization
+  * This function configures the hardware resources used in this example
+  * @param htim_pwm: TIM_PWM handle pointer
+  * @retval None
+  */
+void HAL_TIM_PWM_MspInit(TIM_HandleTypeDef* htim_pwm)
+{
+  if(htim_pwm->Instance==TIM3)
+  {
+    /* USER CODE BEGIN TIM3_MspInit 0 */
+
+    /* USER CODE END TIM3_MspInit 0 */
+    /* Peripheral clock enable */
+    __HAL_RCC_TIM3_CLK_ENABLE();
+    /* USER CODE BEGIN TIM3_MspInit 1 */
+
+    /* USER CODE END TIM3_MspInit 1 */
+
+  }
+
+}
+
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef* htim)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
@@ -328,6 +353,30 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef* htim)
     /* USER CODE BEGIN TIM1_MspPostInit 1 */
 
     /* USER CODE END TIM1_MspPostInit 1 */
+  }
+  else if(htim->Instance==TIM3)
+  {
+    /* USER CODE BEGIN TIM3_MspPostInit 0 */
+
+    /* USER CODE END TIM3_MspPostInit 0 */
+
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    /**TIM3 GPIO Configuration
+    PC6     ------> TIM3_CH1
+    PC7     ------> TIM3_CH2
+    PC8     ------> TIM3_CH3
+    PC9     ------> TIM3_CH4
+    */
+    GPIO_InitStruct.Pin = PWM9_Pin|PWM10_Pin|PWM11_Pin|PWM12_Pin;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    GPIO_InitStruct.Alternate = GPIO_AF2_TIM3;
+    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+    /* USER CODE BEGIN TIM3_MspPostInit 1 */
+
+    /* USER CODE END TIM3_MspPostInit 1 */
   }
   else if(htim->Instance==TIM4)
   {
@@ -387,6 +436,28 @@ void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef* htim_base)
     /* USER CODE BEGIN TIM4_MspDeInit 1 */
 
     /* USER CODE END TIM4_MspDeInit 1 */
+  }
+
+}
+
+/**
+  * @brief TIM_PWM MSP De-Initialization
+  * This function freeze the hardware resources used in this example
+  * @param htim_pwm: TIM_PWM handle pointer
+  * @retval None
+  */
+void HAL_TIM_PWM_MspDeInit(TIM_HandleTypeDef* htim_pwm)
+{
+  if(htim_pwm->Instance==TIM3)
+  {
+    /* USER CODE BEGIN TIM3_MspDeInit 0 */
+
+    /* USER CODE END TIM3_MspDeInit 0 */
+    /* Peripheral clock disable */
+    __HAL_RCC_TIM3_CLK_DISABLE();
+    /* USER CODE BEGIN TIM3_MspDeInit 1 */
+
+    /* USER CODE END TIM3_MspDeInit 1 */
   }
 
 }
@@ -585,6 +656,59 @@ void HAL_UART_MspInit(UART_HandleTypeDef* huart)
 
     /* USER CODE END UART7_MspInit 1 */
   }
+  else if(huart->Instance==UART8)
+  {
+    /* USER CODE BEGIN UART8_MspInit 0 */
+
+    /* USER CODE END UART8_MspInit 0 */
+
+  /** Initializes the peripherals clock
+  */
+    PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_UART8;
+    PeriphClkInitStruct.Uart8ClockSelection = RCC_UART8CLKSOURCE_PCLK1;
+    if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    /* Peripheral clock enable */
+    __HAL_RCC_UART8_CLK_ENABLE();
+
+    __HAL_RCC_GPIOE_CLK_ENABLE();
+    /**UART8 GPIO Configuration
+    PE0     ------> UART8_RX
+    PE1     ------> UART8_TX
+    */
+    GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF8_UART8;
+    HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+    /* UART8 DMA Init */
+    /* UART8_RX Init */
+    hdma_uart8_rx.Instance = DMA1_Stream6;
+    hdma_uart8_rx.Init.Channel = DMA_CHANNEL_5;
+    hdma_uart8_rx.Init.Direction = DMA_PERIPH_TO_MEMORY;
+    hdma_uart8_rx.Init.PeriphInc = DMA_PINC_DISABLE;
+    hdma_uart8_rx.Init.MemInc = DMA_MINC_ENABLE;
+    hdma_uart8_rx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+    hdma_uart8_rx.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+    hdma_uart8_rx.Init.Mode = DMA_NORMAL;
+    hdma_uart8_rx.Init.Priority = DMA_PRIORITY_LOW;
+    hdma_uart8_rx.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
+    if (HAL_DMA_Init(&hdma_uart8_rx) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    __HAL_LINKDMA(huart,hdmarx,hdma_uart8_rx);
+
+    /* USER CODE BEGIN UART8_MspInit 1 */
+
+    /* USER CODE END UART8_MspInit 1 */
+  }
   else if(huart->Instance==USART2)
   {
     /* USER CODE BEGIN USART2_MspInit 0 */
@@ -745,6 +869,26 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* huart)
 
     /* USER CODE END UART7_MspDeInit 1 */
   }
+  else if(huart->Instance==UART8)
+  {
+    /* USER CODE BEGIN UART8_MspDeInit 0 */
+
+    /* USER CODE END UART8_MspDeInit 0 */
+    /* Peripheral clock disable */
+    __HAL_RCC_UART8_CLK_DISABLE();
+
+    /**UART8 GPIO Configuration
+    PE0     ------> UART8_RX
+    PE1     ------> UART8_TX
+    */
+    HAL_GPIO_DeInit(GPIOE, GPIO_PIN_0|GPIO_PIN_1);
+
+    /* UART8 DMA DeInit */
+    HAL_DMA_DeInit(huart->hdmarx);
+    /* USER CODE BEGIN UART8_MspDeInit 1 */
+
+    /* USER CODE END UART8_MspDeInit 1 */
+  }
   else if(huart->Instance==USART2)
   {
     /* USER CODE BEGIN USART2_MspDeInit 0 */
@@ -782,94 +926,6 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* huart)
     /* USER CODE BEGIN USART3_MspDeInit 1 */
 
     /* USER CODE END USART3_MspDeInit 1 */
-  }
-
-}
-
-/**
-  * @brief PCD MSP Initialization
-  * This function configures the hardware resources used in this example
-  * @param hpcd: PCD handle pointer
-  * @retval None
-  */
-void HAL_PCD_MspInit(PCD_HandleTypeDef* hpcd)
-{
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-  RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
-  if(hpcd->Instance==USB_OTG_FS)
-  {
-    /* USER CODE BEGIN USB_OTG_FS_MspInit 0 */
-
-    /* USER CODE END USB_OTG_FS_MspInit 0 */
-
-  /** Initializes the peripherals clock
-  */
-    PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_CLK48;
-    PeriphClkInitStruct.Clk48ClockSelection = RCC_CLK48SOURCE_PLL;
-    if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
-    {
-      Error_Handler();
-    }
-
-    __HAL_RCC_GPIOA_CLK_ENABLE();
-    /**USB_OTG_FS GPIO Configuration
-    PA8     ------> USB_OTG_FS_SOF
-    PA9     ------> USB_OTG_FS_VBUS
-    PA10     ------> USB_OTG_FS_ID
-    PA11     ------> USB_OTG_FS_DM
-    PA12     ------> USB_OTG_FS_DP
-    */
-    GPIO_InitStruct.Pin = USB_SOF_Pin|USB_ID_Pin|USB_DM_Pin|USB_DP_Pin;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-    GPIO_InitStruct.Alternate = GPIO_AF10_OTG_FS;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-    GPIO_InitStruct.Pin = USB_VBUS_Pin;
-    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(USB_VBUS_GPIO_Port, &GPIO_InitStruct);
-
-    /* Peripheral clock enable */
-    __HAL_RCC_USB_OTG_FS_CLK_ENABLE();
-    /* USER CODE BEGIN USB_OTG_FS_MspInit 1 */
-
-    /* USER CODE END USB_OTG_FS_MspInit 1 */
-
-  }
-
-}
-
-/**
-  * @brief PCD MSP De-Initialization
-  * This function freeze the hardware resources used in this example
-  * @param hpcd: PCD handle pointer
-  * @retval None
-  */
-void HAL_PCD_MspDeInit(PCD_HandleTypeDef* hpcd)
-{
-  if(hpcd->Instance==USB_OTG_FS)
-  {
-    /* USER CODE BEGIN USB_OTG_FS_MspDeInit 0 */
-
-    /* USER CODE END USB_OTG_FS_MspDeInit 0 */
-    /* Peripheral clock disable */
-    __HAL_RCC_USB_OTG_FS_CLK_DISABLE();
-
-    /**USB_OTG_FS GPIO Configuration
-    PA8     ------> USB_OTG_FS_SOF
-    PA9     ------> USB_OTG_FS_VBUS
-    PA10     ------> USB_OTG_FS_ID
-    PA11     ------> USB_OTG_FS_DM
-    PA12     ------> USB_OTG_FS_DP
-    */
-    HAL_GPIO_DeInit(GPIOA, USB_SOF_Pin|USB_VBUS_Pin|USB_ID_Pin|USB_DM_Pin
-                          |USB_DP_Pin);
-
-    /* USER CODE BEGIN USB_OTG_FS_MspDeInit 1 */
-
-    /* USER CODE END USB_OTG_FS_MspDeInit 1 */
   }
 
 }

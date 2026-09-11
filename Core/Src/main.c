@@ -75,18 +75,19 @@ CAN_HandleTypeDef hcan1;
 ETH_HandleTypeDef heth;
 
 TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
 
 UART_HandleTypeDef huart4;
 UART_HandleTypeDef huart5;
 UART_HandleTypeDef huart7;
+UART_HandleTypeDef huart8;
 UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
 DMA_HandleTypeDef hdma_uart4_rx;
 DMA_HandleTypeDef hdma_uart5_rx;
 DMA_HandleTypeDef hdma_uart7_rx;
-
-PCD_HandleTypeDef hpcd_USB_OTG_FS;
+DMA_HandleTypeDef hdma_uart8_rx;
 
 /* USER CODE BEGIN PV */
 
@@ -130,6 +131,10 @@ int pwm5 = 0;
 int pwm6 = 0;
 int pwm7 = 0;
 int pwm8 = 0;
+int pwm9 = 0;
+int pwm10 = 0;
+int pwm11 = 0;
+int pwm12 = 0;
 
 int rem1 = 0;
 int rem2 = 0;
@@ -139,18 +144,26 @@ int rem5 = 0;
 int rem6 = 0;
 int rem7 = 0;
 int rem8 = 0;
+int rem9 = 0;
+int rem10 = 0;
+int rem11 = 0;
+int rem12 = 0;
 
 int maxpwm = (1000 * 7) / 10; // 最大PWM値を0.7倍にして減速させる
 //int test;
 
 int maxmv = 150;
 
-int stop_flag = 0;
-int timer_flag = 0;
-int reset_flag = 0;
-int set_flag = 0;
+int stop_flag1 = 0;
+int reset_flag1 = 0;
+int stop_flag2 = 0;
+int reset_flag2 = 0;
 
-int roller_dir = 0; // ローラーの回転方向を保持する変数
+int timer_flag = 0;
+
+
+int roller_dir1 = 0; // ローラー1の回転方向を保持する変数
+int roller_dir2 = 0; // ローラー2の回転方向を保持する変数
 
 // ローラーは常に正転で方向転換しないため、dirの受け皿は共用の捨て変数でよい
 int dummy = 0;
@@ -196,7 +209,6 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_CAN1_Init(void);
 static void MX_ETH_Init(void);
-static void MX_USB_OTG_FS_PCD_Init(void);
 static void MX_UART5_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_USART3_UART_Init(void);
@@ -204,6 +216,8 @@ static void MX_TIM4_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_UART4_Init(void);
 static void MX_UART7_Init(void);
+static void MX_TIM3_Init(void);
+static void MX_UART8_Init(void);
 /* USER CODE BEGIN PFP */
 
 // if(sbus_frame[0] != 0x0F)
@@ -249,7 +263,6 @@ int main(void)
   MX_DMA_Init();
   MX_CAN1_Init();
   MX_ETH_Init();
-  MX_USB_OTG_FS_PCD_Init();
   MX_UART5_Init();
   MX_USART2_UART_Init();
   MX_USART3_UART_Init();
@@ -257,6 +270,8 @@ int main(void)
   MX_TIM1_Init();
   MX_UART4_Init();
   MX_UART7_Init();
+  MX_TIM3_Init();
+  MX_UART8_Init();
   /* USER CODE BEGIN 2 */
     HAL_CAN_Start(&hcan1); // CANstart
     HAL_CAN_ActivateNotification(&hcan1,
@@ -271,6 +286,12 @@ int main(void)
     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
     HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_4);
+
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
+
 
 
     SBUS_Init(); // ★【修正】SBUSの受信を開始
@@ -306,10 +327,16 @@ int main(void)
         lidar();//lidarの値の読み取り
       
         if(HAL_GPIO_ReadPin(lock6_GPIO_Port, lock6_Pin) == 0){
-          stop_flag = 1;
+          stop_flag1 = 1;
         }
         if(HAL_GPIO_ReadPin(lock7_GPIO_Port, lock7_Pin) == 0){
-          reset_flag = 1;
+          reset_flag1 = 1;
+        }
+        if(HAL_GPIO_ReadPin(lock8_GPIO_Port, lock8_Pin) == 0){
+          stop_flag2 = 1;
+        }
+        if(HAL_GPIO_ReadPin(lock9_GPIO_Port, lock9_Pin) == 0){
+          reset_flag2 = 1;
         }
         
 
@@ -405,15 +432,23 @@ int main(void)
     __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, pwm4); // m4  RB
     HAL_GPIO_WritePin(d2_GPIO_Port, d2_Pin, dir4);
 
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, pwm5); // m5 ue
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, pwm5); // m5 ue1
     HAL_GPIO_WritePin(d7_GPIO_Port, d7_Pin, 1);
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pwm6); // m6 sita
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pwm6); // m6 sita1
     HAL_GPIO_WritePin(d8_GPIO_Port, d8_Pin, 0);
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, pwm7); // m7 souten
-    HAL_GPIO_WritePin(d5_GPIO_Port, d5_Pin, roller_dir);
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_4, pwm8); // m8
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, pwm7); // m7 souten1
+    HAL_GPIO_WritePin(d5_GPIO_Port, d5_Pin, roller_dir1);
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_4, pwm8); // m8 ue1
     HAL_GPIO_WritePin(d6_GPIO_Port, d6_Pin, 1);
 
+      __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, pwm9); // m9 sita2
+    HAL_GPIO_WritePin(d9_GPIO_Port, d9_Pin, 1);
+    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pwm10); // m10 souten2
+    HAL_GPIO_WritePin(d10_GPIO_Port, d10_Pin, roller_dir2);
+    // __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, pwm11); // m11
+    // HAL_GPIO_WritePin(d5_GPIO_Port, d5_Pin, roller_dir);
+    // __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, pwm12); // m12
+    // HAL_GPIO_WritePin(d6_GPIO_Port, d6_Pin, 1);
 
     /* USER CODE END WHILE */
 
@@ -667,6 +702,67 @@ static void MX_TIM1_Init(void)
 }
 
 /**
+  * @brief TIM3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM3_Init(void)
+{
+
+  /* USER CODE BEGIN TIM3_Init 0 */
+
+  /* USER CODE END TIM3_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM3_Init 1 */
+
+  /* USER CODE END TIM3_Init 1 */
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 5;
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 999;
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM3_Init 2 */
+
+  /* USER CODE END TIM3_Init 2 */
+  HAL_TIM_MspPostInit(&htim3);
+
+}
+
+/**
   * @brief TIM4 Initialization Function
   * @param None
   * @retval None
@@ -844,6 +940,42 @@ static void MX_UART7_Init(void)
 }
 
 /**
+  * @brief UART8 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_UART8_Init(void)
+{
+
+  /* USER CODE BEGIN UART8_Init 0 */
+
+  /* USER CODE END UART8_Init 0 */
+
+  /* USER CODE BEGIN UART8_Init 1 */
+
+  /* USER CODE END UART8_Init 1 */
+  huart8.Instance = UART8;
+  huart8.Init.BaudRate = 100000;
+  huart8.Init.WordLength = UART_WORDLENGTH_9B;
+  huart8.Init.StopBits = UART_STOPBITS_2;
+  huart8.Init.Parity = UART_PARITY_EVEN;
+  huart8.Init.Mode = UART_MODE_TX_RX;
+  huart8.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart8.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart8.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart8.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_RXINVERT_INIT;
+  huart8.AdvancedInit.RxPinLevelInvert = UART_ADVFEATURE_RXINV_ENABLE;
+  if (HAL_UART_Init(&huart8) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN UART8_Init 2 */
+
+  /* USER CODE END UART8_Init 2 */
+
+}
+
+/**
   * @brief USART2 Initialization Function
   * @param None
   * @retval None
@@ -914,41 +1046,6 @@ static void MX_USART3_UART_Init(void)
 }
 
 /**
-  * @brief USB_OTG_FS Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_USB_OTG_FS_PCD_Init(void)
-{
-
-  /* USER CODE BEGIN USB_OTG_FS_Init 0 */
-
-  /* USER CODE END USB_OTG_FS_Init 0 */
-
-  /* USER CODE BEGIN USB_OTG_FS_Init 1 */
-
-  /* USER CODE END USB_OTG_FS_Init 1 */
-  hpcd_USB_OTG_FS.Instance = USB_OTG_FS;
-  hpcd_USB_OTG_FS.Init.dev_endpoints = 6;
-  hpcd_USB_OTG_FS.Init.speed = PCD_SPEED_FULL;
-  hpcd_USB_OTG_FS.Init.dma_enable = DISABLE;
-  hpcd_USB_OTG_FS.Init.phy_itface = PCD_PHY_EMBEDDED;
-  hpcd_USB_OTG_FS.Init.Sof_enable = ENABLE;
-  hpcd_USB_OTG_FS.Init.low_power_enable = DISABLE;
-  hpcd_USB_OTG_FS.Init.lpm_enable = DISABLE;
-  hpcd_USB_OTG_FS.Init.vbus_sensing_enable = ENABLE;
-  hpcd_USB_OTG_FS.Init.use_dedicated_ep1 = DISABLE;
-  if (HAL_PCD_Init(&hpcd_USB_OTG_FS) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USB_OTG_FS_Init 2 */
-
-  /* USER CODE END USB_OTG_FS_Init 2 */
-
-}
-
-/**
   * Enable DMA controller clock
   */
 static void MX_DMA_Init(void)
@@ -967,6 +1064,9 @@ static void MX_DMA_Init(void)
   /* DMA1_Stream3_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Stream3_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Stream3_IRQn);
+  /* DMA1_Stream6_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream6_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream6_IRQn);
 
 }
 
@@ -996,8 +1096,8 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOF, d5_Pin|d7_Pin|d8_Pin|d6_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, LD1_Pin|d1_Pin|d2_Pin|LD3_Pin
-                          |LD2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, LD1_Pin|d1_Pin|d2_Pin|d12_Pin
+                          |d11_Pin|LD3_Pin|LD2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(d3_GPIO_Port, d3_Pin, GPIO_PIN_RESET);
@@ -1007,6 +1107,9 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOG, lock1_Pin|lock4_Pin|lock2_Pin|lock3_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, d10_Pin|d9_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : USER_Btn_Pin */
   GPIO_InitStruct.Pin = USER_Btn_Pin;
@@ -1021,20 +1124,20 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : LD1_Pin d1_Pin d2_Pin LD3_Pin
-                           LD2_Pin */
-  GPIO_InitStruct.Pin = LD1_Pin|d1_Pin|d2_Pin|LD3_Pin
-                          |LD2_Pin;
+  /*Configure GPIO pins : LD1_Pin d1_Pin d2_Pin d12_Pin
+                           d11_Pin LD3_Pin LD2_Pin */
+  GPIO_InitStruct.Pin = LD1_Pin|d1_Pin|d2_Pin|d12_Pin
+                          |d11_Pin|LD3_Pin|LD2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : lock9_Pin */
-  GPIO_InitStruct.Pin = lock9_Pin;
+  /*Configure GPIO pins : lock9_Pin lock8_Pin */
+  GPIO_InitStruct.Pin = lock9_Pin|lock8_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(lock9_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
 
   /*Configure GPIO pin : d3_Pin */
   GPIO_InitStruct.Pin = d3_Pin;
@@ -1063,11 +1166,26 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : lock8_Pin */
-  GPIO_InitStruct.Pin = lock8_Pin;
+  /*Configure GPIO pins : USB_SOF_Pin USB_ID_Pin */
+  GPIO_InitStruct.Pin = USB_SOF_Pin|USB_ID_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  GPIO_InitStruct.Alternate = GPIO_AF10_OTG_FS;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : USB_VBUS_Pin */
+  GPIO_InitStruct.Pin = USB_VBUS_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(lock8_GPIO_Port, &GPIO_InitStruct);
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(USB_VBUS_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : d10_Pin d9_Pin */
+  GPIO_InitStruct.Pin = d10_Pin|d9_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
