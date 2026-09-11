@@ -154,11 +154,11 @@ void motor_control(int SV, int PV, int maxMV, int down_pwm,
 }
 
 // マジックナンバーを意味のある定数に置き換えます
-static const int ROLLER_SPEED = 700;
+static const int ROLLER_SPEED = 960;
 static const int BAKETU_ROLLER_SPEED = 450;
 static const int ROLLER_STOP = 0;
-static const int ROLLER_SPIN_NORMAL_PWM = 300;
-static const int ROLLER_SPIN_REVERSE_PWM = 500;
+static const int ROLLER_SPIN_NORMAL_PWM = 600;
+static const int ROLLER_SPIN_REVERSE_PWM = 600;
 
 uint32_t time3 = 0;
 uint32_t time4 = 0; 
@@ -166,28 +166,28 @@ void roller(void){
     switch (Lmayu) {
         case 1:
             if ((Ltuno == 1 && stop_flag == 0) ) {
-                roller_dir = 0; // 正転
+                roller_dir = 1; // 正転
                 pwm7 = ROLLER_SPIN_NORMAL_PWM;
-                motor_control(ROLLER_SPEED, PV5, 20, 20, 900, &pwm5, &dummy, &rem5);
-                motor_control(ROLLER_SPEED, PV6, 20, 20, 900, &pwm6, &dummy, &rem6);
+                motor_control(ROLLER_SPEED, PV5, 20, 20, 970, &pwm5, &dummy, &rem5);
+                motor_control(ROLLER_SPEED, PV6, 20, 20, 970, &pwm6, &dummy, &rem6);
             } else if((Ltuno == -1 && stop_flag == 0) ) {
-                roller_dir = 0; // 正転
+                roller_dir = 1; // 正転
                 pwm7 = ROLLER_SPIN_NORMAL_PWM;
-                motor_control(BAKETU_ROLLER_SPEED, PV5, 20, 20, 900, &pwm5, &dummy, &rem5);
-                motor_control(BAKETU_ROLLER_SPEED, PV6, 20, 20, 900, &pwm6, &dummy, &rem6);
+                motor_control(BAKETU_ROLLER_SPEED, PV5, 20, 20, 970, &pwm5, &dummy, &rem5);
+                motor_control(BAKETU_ROLLER_SPEED, PV6, 20, 20, 970, &pwm6, &dummy, &rem6);
 
             } else if((Ltuno == 0 && stop_flag == 0) ) {
                 pwm7 = 0;
-                motor_control(ROLLER_STOP, PV5, 20, 20, 900, &pwm5, &dummy, &rem5);
-                motor_control(ROLLER_STOP, PV6, 20, 20, 900, &pwm6, &dummy, &rem6);
+                motor_control(ROLLER_STOP, PV5, 20, 20, 970, &pwm5, &dummy, &rem5);
+                motor_control(ROLLER_STOP, PV6, 20, 20, 970, &pwm6, &dummy, &rem6);
             } else if(stop_flag == 1){
                 if(timer_flag == 0){
                     timer_flag  = 1;
                     time3 = now;
                 }if(now-time3 >= 800){
                 pwm7 = 0;
-                motor_control(ROLLER_STOP, PV5, 20, 20, 900, &pwm5, &dummy, &rem5);
-                motor_control(ROLLER_STOP, PV6, 20, 20, 900, &pwm6, &dummy, &rem6);
+                motor_control(ROLLER_STOP, PV5, 20, 20, 970, &pwm5, &dummy, &rem5);
+                motor_control(ROLLER_STOP, PV6, 20, 20, 970, &pwm6, &dummy, &rem6);
                 }   
             }
             break;
@@ -197,23 +197,23 @@ void roller(void){
             timer_flag = 0;
             pwm7 = 0;
             if(Ltuno == 1){
-                motor_control(ROLLER_SPEED, PV5, 20, 20, 900, &pwm5, &dummy, &rem5);
-                motor_control(ROLLER_SPEED, PV6, 20, 20, 900, &pwm6, &dummy, &rem6);
+                motor_control(ROLLER_SPEED, PV5, 20, 20, 970, &pwm5, &dummy, &rem5);
+                motor_control(ROLLER_SPEED, PV6, 20, 20, 970, &pwm6, &dummy, &rem6);
             } else if(Ltuno == 0){
-                motor_control(ROLLER_STOP, PV5, 20, 20, 900, &pwm5, &dummy, &rem5);
-                motor_control(ROLLER_STOP, PV6, 20, 20, 900, &pwm6, &dummy, &rem6);
+                motor_control(ROLLER_STOP, PV5, 20, 20, 970, &pwm5, &dummy, &rem5);
+                motor_control(ROLLER_STOP, PV6, 20, 20, 970, &pwm6, &dummy, &rem6);
             } else if(Ltuno == -1  ) {
-                roller_dir = 0; // 正転
-                motor_control(BAKETU_ROLLER_SPEED, PV5, 20, 20, 900, &pwm5, &dummy, &rem5);
-                motor_control(BAKETU_ROLLER_SPEED, PV6, 20, 20, 900, &pwm6, &dummy, &rem6);
+                roller_dir = 1; // 正転
+                motor_control(BAKETU_ROLLER_SPEED, PV5, 20, 20, 970, &pwm5, &dummy, &rem5);
+                motor_control(BAKETU_ROLLER_SPEED, PV6, 20, 20, 970, &pwm6, &dummy, &rem6);
             }
             break;
 
       case -1:
             stop_flag = 0;
             timer_flag = 0;
-            motor_control(ROLLER_STOP, PV5, 20, 20, 900, &pwm5, &dummy, &rem5);
-            motor_control(ROLLER_STOP, PV6, 20, 20, 900, &pwm6, &dummy, &rem6);
+            motor_control(ROLLER_STOP, PV5, 20, 20, 950, &pwm5, &dummy, &rem5);
+            motor_control(ROLLER_STOP, PV6, 20, 20, 950, &pwm6, &dummy, &rem6);
             break;     
     }
     if (reset_flag == 1 && set_flag == 0) {
@@ -223,7 +223,7 @@ void roller(void){
     }
        if(now - time4 <= 2000 && set_flag == 1){
         pwm7 = ROLLER_SPIN_REVERSE_PWM;
-        roller_dir = 1; // 逆転
+        roller_dir = 0; // 逆転
        }else if(now - time4 > 2000 && set_flag == 1){
         pwm7 = 0;
         set_flag = 0;
@@ -293,7 +293,7 @@ void safety(void) {
   uint8_t blink_state = (now / 300) % 2;
 
   // Failsafe は「受信機が送信機を見失った」決定的な信号なので必ず見る
-  if(SBUS_CH[0] == 0 || SBUS_LostFrame || SBUS_Failsafe){
+  if(SBUS_CH[0] == 0 || SBUS_LostFrame){
     sbus_error = 1;
   }else{
     sbus_error = 0;

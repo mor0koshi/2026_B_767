@@ -390,7 +390,8 @@ int main(void)
       // printf("m1:%d d1:%d m2:%d d2:%d m3:%d d3:%d m4:%d d4:%d ltsw:%d rtsw:%d pwm1 %d\n", m1, d1, m2, d2, m3, d3, m4, d4,ltsw,rtsw,pwm1);
       //printf("stop_flag: %d\n", stop_flag);
       //printf("distance4: %d distance7: %d\n", distance4, distance7);
-      printf("pwm5:%d pwm6:%d PV5:%d  PV6:%d\n",pwm5,pwm6,PV5,PV6);
+      //printf("pwm5:%d pwm6:%d PV5:%d  PV6:%d\n",pwm5,pwm6,PV5,PV6);
+      //printf("dir1 %d  ")
       time = HAL_GetTick(); // 時間更新
     }
 
@@ -405,9 +406,9 @@ int main(void)
     HAL_GPIO_WritePin(d2_GPIO_Port, d2_Pin, dir4);
 
     __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, pwm5); // m5 ue
-    HAL_GPIO_WritePin(d7_GPIO_Port, d7_Pin, 0);
+    HAL_GPIO_WritePin(d7_GPIO_Port, d7_Pin, 1);
     __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pwm6); // m6 sita
-    HAL_GPIO_WritePin(d8_GPIO_Port, d8_Pin, 1);
+    HAL_GPIO_WritePin(d8_GPIO_Port, d8_Pin, 0);
     __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, pwm7); // m7 souten
     HAL_GPIO_WritePin(d5_GPIO_Port, d5_Pin, roller_dir);
     __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_4, pwm8); // m8

@@ -22,7 +22,7 @@ extern "C" {
 #define LIDAR_OFFSET7 38
 
 /* 全自動モードで壁から保つ目標距離(mm) */
-#define AUTO_TARGET_DIST_MM 500
+#define AUTO_TARGET_DIST_MM 1770
 
 /* ペリフェラルハンドル (main.c で定義) */
 extern DMA_HandleTypeDef hdma_uart4_rx;
