@@ -1,0 +1,39 @@
+# C言語の自動整形ルール
+# 使い方: clang-format -i Core/Src/function.c
+#
+# 注意: main.c や stm32f7xx_*.c は CubeMX が自動生成するファイルなので整形しないこと。
+#       再生成時に上書きされて差分が無駄に大きくなります。
+#       整形するのは自分で書いたファイル (function.c / sbus_handler.c / lidar_sensor.c など) だけ。
+
+BasedOnStyle: LLVM
+
+# インデントは半角スペース4つ。タブは使わない
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+
+# 1行の長さ上限。既存の motor_control(...) の呼び出し(約95文字)を
+# 折り返さずに残したいので広めにしている
+ColumnLimit: 120
+
+# 波括弧は行末に付ける  例: if (x) {
+BreakBeforeBraces: Attach
+
+# if や for の中身が1行でも、必ず改行して波括弧を付ける
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+AllowShortBlocksOnASingleLine: Never
+
+# if( ではなく if ( と書く
+SpaceBeforeParens: ControlStatements
+
+# ポインタは int *p の形に揃える
+PointerAlignment: Right
+
+# 行末コメントの位置を縦に揃える
+AlignTrailingComments: true
+
+# #include の順番は並べ替えない。
+# 組み込みではヘッダの読み込み順に依存する箇所があるため
+SortIncludes: false

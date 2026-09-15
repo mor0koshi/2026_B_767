@@ -1,4 +1,7 @@
 {
+    "[c]": {
+        "editor.defaultFormatter": "STMicroelectronics.stm32cube-ide-clangd"
+    },
     "cmake.cmakePath": "cube-cmake",
     "cmake.configureArgs": [
         "-DCMAKE_COMMAND=cube-cmake"

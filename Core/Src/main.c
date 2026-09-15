@@ -408,19 +408,20 @@ int main(void)
 
 
     // デバッグ用のprintf、100msごとに出力
-    // static を外すと毎周回 0 に初期化され、条件が常に真になって毎周期送信になる
-    static uint32_t time = 0;
-    if (HAL_GetTick() - time >= 100) {
-      //printf("data0:%d data1:%d data2:%d data3:%d data4:%d data5:%d data6:%d data7:%d\n", use_data[0], use_data[1], use_data[2], use_data[3], use_data[4], use_data[5], use_data[6], use_data[7]); 
-       //printf("0:%d 1:%d 2:%d 3:%d 4:%d 5:%d 6:%d 7:%d\n", sbus0, sbus1, sbus2, sbus3 ,SBUS_CH[4], SBUS_CH[5], SBUS_CH[6], SBUS_CH[7]);
-      // printf("PV1:%d PV2:%d  PV3:%d PV4:%d m1:%d m2:%d m3:%d m4:%d lastMV1:%.1f lastMV2:%.1f lastMV3:%.1f lastMV4:%.1f\n", PV1, PV2, PV3, PV4, m1, m2, m3, m4, (float)lastMV1, (float)lastMV2, (float)lastMV3, (float)lastMV4);
-      // printf("m1:%d d1:%d m2:%d d2:%d m3:%d d3:%d m4:%d d4:%d ltsw:%d rtsw:%d pwm1 %d\n", m1, d1, m2, d2, m3, d3, m4, d4,ltsw,rtsw,pwm1);
-      //printf("stop_flag: %d\n", stop_flag);
-      //printf("distance4: %d distance7: %d\n", distance4, distance7);
-      //printf("pwm5:%d pwm6:%d PV5:%d  PV6:%d\n",pwm5,pwm6,PV5,PV6);
-      //printf("dir1 %d  ")
-      time = HAL_GetTick(); // 時間更新
-    }
+    //static を外すと毎周回 0 に初期化され、条件が常に真になって毎周期送信になる
+    // static uint32_t time = 0;
+    // if (HAL_GetTick() - time >= 100) {
+    //   //printf("data0:%d data1:%d data2:%d data3:%d data4:%d data5:%d data6:%d data7:%d\n", use_data[0], use_data[1], use_data[2], use_data[3], use_data[4], use_data[5], use_data[6], use_data[7]); 
+    //    //printf("0:%d 1:%d 2:%d 3:%d 4:%d 5:%d 6:%d 7:%d\n", sbus0, sbus1, sbus2, sbus3 ,SBUS_CH[4], SBUS_CH[5], SBUS_CH[6], SBUS_CH[7]);
+    //   // printf("PV1:%d PV2:%d  PV3:%d PV4:%d m1:%d m2:%d m3:%d m4:%d lastMV1:%.1f lastMV2:%.1f lastMV3:%.1f lastMV4:%.1f\n", PV1, PV2, PV3, PV4, m1, m2, m3, m4, (float)lastMV1, (float)lastMV2, (float)lastMV3, (float)lastMV4);
+    //   // printf("m1:%d d1:%d m2:%d d2:%d m3:%d d3:%d m4:%d d4:%d ltsw:%d rtsw:%d pwm1 %d\n", m1, d1, m2, d2, m3, d3, m4, d4,ltsw,rtsw,pwm1);
+    //   //printf("stop_flag: %d\n", stop_flag);
+    //   //printf("distance4: %d distance7: %d\n", distance4, distance7);
+    //   //printf("pwm5:%d pwm6:%d PV5:%d  PV6:%d\n",pwm5,pwm6,PV5,PV6);
+    //   printf("dir1 %d  dir2 %d  dir3 %d  dir4 %d\n",dir1,dir2,dir3,dir4);
+    //   time = HAL_GetTick(); // 時間更新
+    // }
+
 
     //motor
     __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_4, pwm1); // m1 LF
@@ -429,7 +430,7 @@ int main(void)
     HAL_GPIO_WritePin(d4_GPIO_Port, d4_Pin, dir2);
     __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, pwm3); // m3 LB
     HAL_GPIO_WritePin(d1_GPIO_Port, d1_Pin, dir3);
-    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, pwm4); // m4  RB
+    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, pwm4); // m4 
     HAL_GPIO_WritePin(d2_GPIO_Port, d2_Pin, dir4);
 
     __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, pwm5); // m5 ue1
@@ -442,7 +443,7 @@ int main(void)
     HAL_GPIO_WritePin(d6_GPIO_Port, d6_Pin, 1);
 
       __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, pwm9); // m9 sita2
-    HAL_GPIO_WritePin(d9_GPIO_Port, d9_Pin, 1);
+    HAL_GPIO_WritePin(d9_GPIO_Port, d9_Pin, 04);
     __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pwm10); // m10 souten2
     HAL_GPIO_WritePin(d10_GPIO_Port, d10_Pin, roller_dir2);
     // __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, pwm11); // m11
@@ -664,10 +665,6 @@ static void MX_TIM1_Init(void)
   sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
   sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
   if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
   {
     Error_Handler();
   }
