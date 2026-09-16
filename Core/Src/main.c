@@ -96,10 +96,13 @@ int ly;   // lyスティック
 int ry;   // ryスティック
 int lx;   // lxスティック
 
-int Lmayu; 
-int Rmayu; 
-int Ltuno;
-int Rtuno;
+int Lmayu1;
+int Lmayu2;
+int Rmayu1;
+int Rmayu2;
+int Ltuno1;
+int Ltuno2;
+int Rtuno2;
 
 volatile int m1; 
 volatile int m2; 
@@ -347,7 +350,7 @@ int main(void)
       // 測定値が途絶えている間は自動系を止め、手動モードとして扱う。
       int lidar_ng = lidar_timeout();
 
-      if(Rtuno == 1 || lidar_ng) {
+      if(Rmayu1 == 1 || lidar_ng) {
         // 手動モード（Lidar異常時もここに落ちる）
         // ★裏でPIDの記憶をリセットしておく。
         //   引数は全自動モードと必ず同じにすること（違うと切替時にD項が跳ねる）
@@ -356,7 +359,7 @@ int main(void)
         motor_control(m2, PV2, maxmv, maxmv, maxpwm, &pwm2, &dir2, &rem2);
         motor_control(m3, PV3, maxmv, maxmv, maxpwm, &pwm3, &dir3, &rem3);
         motor_control(m4, PV4, maxmv, maxmv, maxpwm, &pwm4, &dir4, &rem4);
-      } else if(Rtuno == 0){
+      } else if(Rmayu1 == 0){
         auto_mode(distance4 - LIDAR_OFFSET4, distance7 - LIDAR_OFFSET7, 0,
                   (distance4 + distance7 - (LIDAR_OFFSET4 + LIDAR_OFFSET7)) / 2);
         int gauto_m1 =  ly - lx + auto_rx;
@@ -369,7 +372,7 @@ int main(void)
         motor_control(gauto_m3, PV3, maxmv, maxmv, maxpwm, &pwm3, &dir3, &rem3);
         motor_control(gauto_m4, PV4, maxmv, maxmv, maxpwm, &pwm4, &dir4, &rem4);
 
-      }else if(Rtuno == -1) {
+      }else if(Rmayu1 == -1) {
         // 自動モード
         auto_mode(distance4 - LIDAR_OFFSET4, distance7 - LIDAR_OFFSET7, 0, AUTO_TARGET_DIST_MM);
 
@@ -386,21 +389,38 @@ int main(void)
         motor_control(auto_m4, PV4, maxmv, maxmv, maxpwm, &pwm4, &dir4, &rem4);
       }
 
-      roller();
+      // roller();
 
       time1 = now;
     }
 
     // 電磁弁
-    if (Rmayu == 0) {
+    switch (Rtuno2) {
+    case 0: // 打たない
+      HAL_GPIO_WritePin(lock1_GPIO_Port, lock1_Pin, 0);
+      HAL_GPIO_WritePin(lock4_GPIO_Port, lock4_Pin, 0);
+
+      roller();
+      break;
+    case 1:              // 打つ
+      if (Lmayu2 == 0) { // ローラーが止まっている
+        switch (Rmayu2) {
+        case 0:
+          HAL_GPIO_WritePin(lock1_GPIO_Port, lock1_Pin, 1);
+          HAL_GPIO_WritePin(lock4_GPIO_Port, lock4_Pin, 0);
+          break;
+        case 1:
+          HAL_GPIO_WritePin(lock1_GPIO_Port, lock1_Pin, 0);
+          HAL_GPIO_WritePin(lock4_GPIO_Port, lock4_Pin, 1);
+          break;
+        }
+      } else if (Lmayu2 == 1) { // ローラーが回っている
         HAL_GPIO_WritePin(lock1_GPIO_Port, lock1_Pin, 0);
         HAL_GPIO_WritePin(lock4_GPIO_Port, lock4_Pin, 0);
-    } else if (Rmayu == 1) {
-        HAL_GPIO_WritePin(lock1_GPIO_Port, lock1_Pin, 1);
-        HAL_GPIO_WritePin(lock4_GPIO_Port, lock4_Pin, 0);
-    } else if (Rmayu == -1) {
-        HAL_GPIO_WritePin(lock1_GPIO_Port, lock1_Pin, 0);
-        HAL_GPIO_WritePin(lock4_GPIO_Port, lock4_Pin, 1);
+        roller();
+      }
+
+      break;
     }
 
     safety(); // 安全機能の呼び出し
@@ -419,6 +439,8 @@ int main(void)
     //   //printf("distance4: %d distance7: %d\n", distance4, distance7);
     //   //printf("pwm5:%d pwm6:%d PV5:%d  PV6:%d\n",pwm5,pwm6,PV5,PV6);
     //   printf("dir1 %d  dir2 %d  dir3 %d  dir4 %d\n",dir1,dir2,dir3,dir4);
+    //   printf("Lmayu1:%d Lmayu2:%d Rmayu2:%d Ltuno1:%d Ltuno2:%d Rtuno2:%d\n",
+    //          Lmayu1, Lmayu2, Rmayu2, Ltuno1, Ltuno2, Rtuno2);
     //   time = HAL_GetTick(); // 時間更新
     // }
 

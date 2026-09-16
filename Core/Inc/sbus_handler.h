@@ -25,10 +25,14 @@ extern int ly;
 extern int ry;
 extern int lx;
 
-extern int Lmayu;
-extern int Rmayu;
-extern int Ltuno;
-extern int Rtuno;
+extern int Lmayu1; 
+extern int Lmayu2; 
+extern int Rmayu1;
+extern int Rmayu2; 
+extern int Ltuno1;
+extern int Ltuno2;
+extern int Rtuno2;
+
 
 extern volatile int m1;
 extern volatile int m2;

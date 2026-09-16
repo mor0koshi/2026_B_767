@@ -190,10 +190,10 @@ uint32_t time5 = 0;
 int set_flag1 = 0;
 int set_flag2 = 0;
 void roller(void) {
-    switch (Lmayu) {
+    switch (Lmayu2) {
     case 1:
 
-        if (Ltuno == 1) {
+        if (Ltuno1 == 1) {
             motor_simple_control(ROLLER_SPEED, 10, 970, &pwm5);
             motor_simple_control(ROLLER_SPEED, 10, 970, &pwm6);
 
@@ -207,7 +207,7 @@ void roller(void) {
             }
         }
 
-        else if (Ltuno == 0) {
+        else if (Ltuno1 == 0) {
             motor_simple_control(ROLLER_STOP, 20, 970, &pwm5);
             motor_simple_control(ROLLER_STOP, 20, 970, &pwm6);
 
@@ -223,7 +223,7 @@ void roller(void) {
             }
         }
 
-        else if (Ltuno == -1) {
+        else if (Ltuno1 == -1) {
             motor_simple_control(ROLLER_STOP, 20, 970, &pwm5);
             motor_simple_control(ROLLER_STOP, 20, 970, &pwm6);
             motor_control(BAKETU2_ROLLER_SPEED, PV5, 15, 20, 970, &pwm8, &dummy, &rem8);
@@ -246,21 +246,21 @@ void roller(void) {
         pwm7 = 0;
         pwm10 = 0;
 
-        if (Ltuno == 1) {
+        if (Ltuno1 == 1) {
             motor_control(ROLLER_STOP, PV5, 20, 20, 970, &pwm8, &dummy, &rem8);
             motor_control(ROLLER_STOP, PV6, 20, 20, 970, &pwm9, &dummy, &rem9);
             motor_simple_control(ROLLER_SPEED, 20, 970, &pwm5);
             motor_simple_control(ROLLER_SPEED, 20, 970, &pwm6);
         }
 
-        else if (Ltuno == 0) {
+        else if (Ltuno1 == 0) {
             motor_simple_control(ROLLER_STOP, 20, 970, &pwm5);
             motor_simple_control(ROLLER_STOP, 20, 970, &pwm6);
             motor_control(BAKETU1_ROLLER_SPEED, PV5, 20, 20, 970, &pwm8, &dummy, &rem8);
             motor_control(BAKETU1_ROLLER_SPEED, PV6, 20, 20, 970, &pwm9, &dummy, &rem9);
         }
 
-        else if (Ltuno == -1) {
+        else if (Ltuno1 == -1) {
             motor_simple_control(ROLLER_STOP, 20, 970, &pwm5);
             motor_simple_control(ROLLER_STOP, 20, 970, &pwm6);
             motor_control(BAKETU2_ROLLER_SPEED, PV5, 20, 20, 970, &pwm8, &dummy, &rem8);

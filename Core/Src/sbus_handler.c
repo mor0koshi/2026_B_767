@@ -73,11 +73,18 @@ void SBUS_Process(void) {
 }
 
 // SBUS用のヘルパー関数
-int get_switch_state(int ch_value) {
+int get_switch_state3(int ch_value) {
     if (ch_value > 1100) {
       return -1;
     }
     if (ch_value < 300){
+      return 1;
+    }
+    return 0;
+}
+
+int get_switch_state2(int ch_value) {
+    if (ch_value > 1100) {
       return 1;
     }
     return 0;
@@ -95,10 +102,12 @@ int process_stick(int ch_value) {
 }
 
 void sbus(void){
-    Lmayu = get_switch_state(SBUS_CH[4]);
-    Rmayu = get_switch_state(SBUS_CH[5]);
-    Ltuno = get_switch_state(SBUS_CH[6]);
-    Rtuno = get_switch_state(SBUS_CH[7]);
+    Lmayu1 = get_switch_state2(SBUS_CH[4]);
+    Lmayu2 = get_switch_state2(SBUS_CH[5]);
+    Rmayu1 = get_switch_state3(SBUS_CH[6]);
+    Rmayu2 = get_switch_state2(SBUS_CH[7]);
+    Ltuno2 = get_switch_state3(SBUS_CH[8]);
+    Rtuno2 = get_switch_state2(SBUS_CH[9]);
 
     rx = process_stick(SBUS_CH[0]);
     ly = process_stick(SBUS_CH[1]);
