@@ -100,18 +100,12 @@ int Lmayu2;
 int Rmayu1;
 int Rmayu2;
 int Ltuno1;
-int Ltuno2;
 int Rtuno2;
 
 volatile int m1;
 volatile int m2;
 volatile int m3;
 volatile int m4;
-
-int d1;
-int d2;
-int d3;
-int d4;
 
 volatile int16_t PV1 = 0; // 現在値
 volatile int16_t PV2 = 0; // 現在値
@@ -138,6 +132,17 @@ int pwm10 = 0;
 int pwm11 = 0;
 int pwm12 = 0;
 
+int output_pwm1 = 0;
+int output_pwm2 = 0;
+int output_pwm3 = 0;
+int output_pwm4 = 0;
+int output_pwm5 = 0;
+int output_pwm6 = 0;
+int output_pwm7 = 0;
+int output_pwm8 = 0;
+int output_pwm9 = 0;
+int output_pwm10 = 0;
+
 int rem1 = 0;
 int rem2 = 0;
 int rem3 = 0;
@@ -151,17 +156,13 @@ int rem10 = 0;
 int rem11 = 0;
 int rem12 = 0;
 
-int maxpwm = (1000 * 7) / 10; // 最大PWM値を0.7倍にして減速させる
+int maxpwm = (255 * 7) / 10; // 最大PWM値を0.7倍にして減速させる
 // int test;
 
-int maxmv = 150;
+int maxmv = 20;
 
-int stop_flag1 = 0;
 int reset_flag1 = 0;
-int stop_flag2 = 0;
 int reset_flag2 = 0;
-
-int timer_flag = 0;
 
 int roller_dir1 = 0; // ローラー1の回転方向を保持する変数
 int roller_dir2 = 0; // ローラー2の回転方向を保持する変数
@@ -184,7 +185,6 @@ int auto_rx = 0; // 旋回
 
 // timercount
 uint32_t time1 = 0;
-uint32_t time2 = 0;
 // uint32_t time3 = 0;
 uint32_t now = 0;
 
@@ -311,28 +311,37 @@ int main(void) {
     /* USER CODE BEGIN WHILE */
     while (1) {
         now = HAL_GetTick();
-        PV1 = map(use_data[0], 0, 255, 0, 1000);
-        PV2 = map(use_data[1], 0, 255, 0, 1000);
-        PV3 = map(use_data[2], 0, 255, 0, 1000);
-        PV4 = map(use_data[3], 0, 255, 0, 1000);
-        PV5 = map(use_data[4], 0, 255, 0, 1000);
-        PV6 = map(use_data[5], 0, 255, 0, 1000);
+        // PV1 = map(use_data[0], 0, 255, 0, 1000);
+        // PV2 = map(use_data[1], 0, 255, 0, 1000);
+        // PV3 = map(use_data[2], 0, 255, 0, 1000);
+        // PV4 = map(use_data[3], 0, 255, 0, 1000);
+        // PV5 = map(use_data[4], 0, 255, 0, 1000);
+        // PV6 = map(use_data[5], 0, 255, 0, 1000);
+        PV1 = use_data[0];
+        PV2 = use_data[1];
+        PV3 = use_data[2];
+        PV4 = use_data[3];
+        PV5 = use_data[4];
+        PV6 = use_data[5];
 
         sbus(); // SBUSの値の加工
 
         lidar(); // lidarの値の読み取り
 
+        // lock6/lock8 は逆転リセットの開始、lock7/lock9 は原点リミット。
+        // 原点リミットは「リセットの終了」だけを担当させる。ここで pwm を直接 0 に
+        // すると、原点で静止している間は通常の正転指令まで毎周回打ち消されてしまう。
         if (HAL_GPIO_ReadPin(lock6_GPIO_Port, lock6_Pin) == 0) {
-            stop_flag1 = 1;
-        }
-        if (HAL_GPIO_ReadPin(lock7_GPIO_Port, lock7_Pin) == 0) {
             reset_flag1 = 1;
         }
+        if (HAL_GPIO_ReadPin(lock7_GPIO_Port, lock7_Pin) == 0) {
+            reset_flag1 = 0;
+        }
         if (HAL_GPIO_ReadPin(lock8_GPIO_Port, lock8_Pin) == 0) {
-            stop_flag2 = 1;
+            reset_flag2 = 1;
         }
         if (HAL_GPIO_ReadPin(lock9_GPIO_Port, lock9_Pin) == 0) {
-            reset_flag2 = 1;
+            reset_flag2 = 0;
         }
 
         // 足回り
@@ -341,7 +350,7 @@ int main(void) {
             // 測定値が途絶えている間は自動系を止め、手動モードとして扱う。
             int lidar_ng = lidar_timeout();
 
-            if (Rmayu1 == 1 || lidar_ng) {
+            if (Rmayu1 == -1 || lidar_ng) {
                 // 手動モード（Lidar異常時もここに）
                 // ★裏でPIDの記憶をリセットしておく。
                 //   引数は全自動モードと必ず同じにすること（違うと切替時にD項が跳ねる）
@@ -363,7 +372,7 @@ int main(void) {
                 motor_control(gauto_m3, PV3, maxmv, maxmv, maxpwm, &pwm3, &dir3, &rem3);
                 motor_control(gauto_m4, PV4, maxmv, maxmv, maxpwm, &pwm4, &dir4, &rem4);
 
-            } else if (Rmayu1 == -1) {
+            } else if (Rmayu1 == 1) {
                 // 自動モード
                 auto_mode(distance4 - LIDAR_OFFSET4, distance7 - LIDAR_OFFSET7, 0, AUTO_TARGET_DIST_MM);
 
@@ -389,7 +398,7 @@ int main(void) {
         switch (Rtuno2) {
         case 0: // 打たない
             HAL_GPIO_WritePin(lock1_GPIO_Port, lock1_Pin, 0);
-            HAL_GPIO_WritePin(lock4_GPIO_Port, lock4_Pin, 0);
+            HAL_GPIO_WritePin(lock2_GPIO_Port, lock2_Pin, 0);
             pwm7 = 0;
             pwm10 = 0;
 
@@ -399,25 +408,25 @@ int main(void) {
                 switch (Rmayu2) {
                 case 0:
                     HAL_GPIO_WritePin(lock1_GPIO_Port, lock1_Pin, 1);
-                    HAL_GPIO_WritePin(lock4_GPIO_Port, lock4_Pin, 0);
+                    HAL_GPIO_WritePin(lock2_GPIO_Port, lock2_Pin, 0);
                     break;
                 case 1:
                     HAL_GPIO_WritePin(lock1_GPIO_Port, lock1_Pin, 0);
-                    HAL_GPIO_WritePin(lock4_GPIO_Port, lock4_Pin, 1);
+                    HAL_GPIO_WritePin(lock2_GPIO_Port, lock2_Pin, 1);
                     break;
                 }
             } else if (Lmayu2 == 1) { // ローラーが回っている
                 HAL_GPIO_WritePin(lock1_GPIO_Port, lock1_Pin, 0);
-                HAL_GPIO_WritePin(lock4_GPIO_Port, lock4_Pin, 0);
+                HAL_GPIO_WritePin(lock2_GPIO_Port, lock2_Pin, 0);
                 if (Lmayu1 == 1) { // 上ローラー回転中
                     pwm7 = 0;
                     pwm10 = 150;
-                    roller_dir1 = 1; // 上ローラー正転
+                    roller_dir2 = 1; // 上ローラー正転
 
                 } else if (Lmayu1 == 0) { // 下ローラー回転中
                     pwm7 = 150;
                     pwm10 = 0;
-                    roller_dir2 = 1; // 下ローラー正転
+                    roller_dir1 = 1; // 下ローラー正転
                 }
             }
 
@@ -426,52 +435,70 @@ int main(void) {
 
         roller(); // ローラーの制御
 
-        safety(); // 安全機能の呼び出し
+        if (reset_flag1 == 1) {
+            pwm7 = 150;
+            roller_dir1 = 0; // 上ローラー逆転
+        }
+        if (reset_flag2 == 1) {
+            pwm10 = 150;
+            roller_dir2 = 0; // 下ローラー逆転
+        }
+
+         safety(); // 安全機能の呼び出し
+
+        output_pwm1 = map(pwm1, 0, 255, 0, 1000);
+        output_pwm2 = map(pwm2, 0, 255, 0, 1000);
+        output_pwm3 = map(pwm3, 0, 255, 0, 1000);
+        output_pwm4 = map(pwm4, 0, 255, 0, 1000);
+        output_pwm5 = map(pwm5, 0, 255, 0, 1000);
+        output_pwm6 = map(pwm6, 0, 255, 0, 1000);
+        output_pwm7 = map(pwm7, 0, 255, 0, 1000);
+        output_pwm8 = map(pwm8, 0, 255, 0, 1000);
+        output_pwm9 = map(pwm9, 0, 255, 0, 1000);
+        output_pwm10 = map(pwm10, 0, 255, 0, 1000);
+
+       
 
         // デバッグ用のprintf、100msごとに出力
         // static を外すと毎周回 0 に初期化され、条件が常に真になって毎周期送信になる
         // static uint32_t time = 0;
         // if (HAL_GetTick() - time >= 100) {
-        //   //printf("data0:%d data1:%d data2:%d data3:%d data4:%d data5:%d data6:%d data7:%d\n", use_data[0],
-        //   use_data[1], use_data[2], use_data[3], use_data[4], use_data[5], use_data[6], use_data[7]);
         //    //printf("0:%d 1:%d 2:%d 3:%d 4:%d 5:%d 6:%d 7:%d\n", sbus0, sbus1, sbus2, sbus3 ,SBUS_CH[4], SBUS_CH[5],
         //    SBUS_CH[6], SBUS_CH[7]);
         //   // printf("PV1:%d PV2:%d  PV3:%d PV4:%d m1:%d m2:%d m3:%d m4:%d lastMV1:%.1f lastMV2:%.1f lastMV3:%.1f
         //   lastMV4:%.1f\n", PV1, PV2, PV3, PV4, m1, m2, m3, m4, (float)lastMV1, (float)lastMV2, (float)lastMV3,
         //   (float)lastMV4);
-        //   // printf("m1:%d d1:%d m2:%d d2:%d m3:%d d3:%d m4:%d d4:%d ltsw:%d rtsw:%d pwm1 %d\n", m1, d1, m2, d2, m3,
-        //   d3, m4, d4,ltsw,rtsw,pwm1);
         //   //printf("stop_flag: %d\n", stop_flag);
         //   //printf("distance4: %d distance7: %d\n", distance4, distance7);
-        //   //printf("pwm5:%d pwm6:%d PV5:%d  PV6:%d\n",pwm5,pwm6,PV5,PV6);
-        //   printf("dir1 %d  dir2 %d  dir3 %d  dir4 %d\n",dir1,dir2,dir3,dir4);
-          printf("Lmayu1:%d Lmayu2:%d  Rmayu1 %d Rmayu2:%d Ltuno1:%d Ltuno2:%d Rtuno2:%d\n",
-                 Lmayu1, Lmayu2, Rmayu1, Rmayu2, Ltuno1, Ltuno2, Rtuno2);
-        //   time = HAL_GetTick(); // 時間更新
+        //   //printf("pwm8:%d pwm9:%d PV5:%d  PV6:%d\n",pwm5,pwm6,PV5,PV6);
+        // //printf("Lmayu1:%d Lmayu2:%d  Rmayu1 %d Rmayu2:%d Ltuno2:%d Rtuno2:%d\n", Lmayu1, Lmayu2, Rmayu1,
+        //      Rmayu2, Ltuno2, Rtuno2);
+        // printf("Lmayu1:%d Lmayu2:%d  Rmayu1 %d Rmayu2:%d Ltuno2:%d Rtuno2:%d\n", Lmayu1, Lmayu2, Rmayu1, Rmayu2,
+        // Ltuno2,Rtuno2);
         // }
-
+        //   time = HAL_GetTick(); // 時間
         // motor
-        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_4, pwm1); // m1 LF
-        HAL_GPIO_WritePin(d3_GPIO_Port, d3_Pin, dir1);
-        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, pwm2); // m2 RF
-        HAL_GPIO_WritePin(d4_GPIO_Port, d4_Pin, dir2);
-        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, pwm3); // m3 LB
-        HAL_GPIO_WritePin(d1_GPIO_Port, d1_Pin, dir3);
-        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, pwm4); // m4
-        HAL_GPIO_WritePin(d2_GPIO_Port, d2_Pin, dir4);
+        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_4, output_pwm1); // m1
+        HAL_GPIO_WritePin(d1_GPIO_Port, d1_Pin, dir1);
+        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, output_pwm2); // m2 
+        HAL_GPIO_WritePin(d2_GPIO_Port, d2_Pin, dir2);
+        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, output_pwm3); // m3 
+        HAL_GPIO_WritePin(d3_GPIO_Port, d3_Pin, dir3);
+        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, output_pwm4); // m4
+        HAL_GPIO_WritePin(d4_GPIO_Port, d4_Pin, dir4);
 
-        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, pwm5); // m5 ue1
-        HAL_GPIO_WritePin(d7_GPIO_Port, d7_Pin, 1);
-        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pwm6); // m6 sita1
-        HAL_GPIO_WritePin(d8_GPIO_Port, d8_Pin, 0);
-        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, pwm7); // m7 souten1
-        HAL_GPIO_WritePin(d5_GPIO_Port, d5_Pin, roller_dir1);
-        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_4, pwm8); // m8 ue1
-        HAL_GPIO_WritePin(d6_GPIO_Port, d6_Pin, 1);
+        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, output_pwm5); // m5 ue1
+        HAL_GPIO_WritePin(d5_GPIO_Port, d5_Pin, 1);
+        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, output_pwm6); // m6 sita1
+        HAL_GPIO_WritePin(d6_GPIO_Port, d6_Pin, 0);
+        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, output_pwm7); // m7 souten1
+        HAL_GPIO_WritePin(d7_GPIO_Port, d7_Pin, roller_dir1);
+        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_4, output_pwm8); // m8 ue1
+        HAL_GPIO_WritePin(d8_GPIO_Port, d8_Pin, 1);
 
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, pwm9); // m9 sita2
-        HAL_GPIO_WritePin(d9_GPIO_Port, d9_Pin, 04);
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pwm10); // m10 souten2
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, output_pwm9); // m9 sita2
+        HAL_GPIO_WritePin(d9_GPIO_Port, d9_Pin, 0);
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, output_pwm10); // m10 souten2
         HAL_GPIO_WritePin(d10_GPIO_Port, d10_Pin, roller_dir2);
         // __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, pwm11); // m11
         // HAL_GPIO_WritePin(d5_GPIO_Port, d5_Pin, roller_dir);
@@ -675,6 +702,9 @@ static void MX_TIM1_Init(void) {
     sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
     sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
     if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1) != HAL_OK) {
+        Error_Handler();
+    }
+    if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2) != HAL_OK) {
         Error_Handler();
     }
     if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3) != HAL_OK) {

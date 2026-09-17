@@ -95,8 +95,10 @@ void Error_Handler(void);
 #define lock8_GPIO_Port GPIOF
 #define m8_Pin GPIO_PIN_9
 #define m8_GPIO_Port GPIOE
-#define d3_Pin GPIO_PIN_11
+#define d3_Pin GPIO_PIN_10
 #define d3_GPIO_Port GPIOE
+#define m7_Pin GPIO_PIN_11
+#define m7_GPIO_Port GPIOE
 #define m5_Pin GPIO_PIN_13
 #define m5_GPIO_Port GPIOE
 #define m6_Pin GPIO_PIN_14

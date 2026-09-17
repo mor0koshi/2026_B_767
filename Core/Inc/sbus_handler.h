@@ -30,7 +30,6 @@ extern int Lmayu2;
 extern int Rmayu1;
 extern int Rmayu2; 
 extern int Ltuno1;
-extern int Ltuno2;
 extern int Rtuno2;
 
 

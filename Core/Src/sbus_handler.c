@@ -94,7 +94,7 @@ int process_stick(int ch_value) {
     if (ch_value > 1000 && ch_value < 1050){
       ch_value = 1024;
     }
-    int mapped = map(ch_value, 368, 1680, -1000, 1000);
+    int mapped = map(ch_value, 368, 1680, -255, 255);
     if (mapped <= 2 && mapped >= -2){
       return 0; // デッドバンド
     }

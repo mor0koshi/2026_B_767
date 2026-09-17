@@ -176,10 +176,10 @@ void motor_simple_control(int SV, int step, int max_pwm, int *pwmm) {
 }
 
 // マジックナンバーを意味のある定数に置き換えます
-static const int ROLLER_SPEED = 960;
-static const int BAKETU1_ROLLER_SPEED = 450;
-static const int BAKETU2_ROLLER_SPEED = 450;
-static const int BAKETU3_ROLLER_SPEED = 450;
+static const int ROLLER_SPEED = 240;
+static const int BAKETU1_ROLLER_SPEED = 100;
+static const int BAKETU2_ROLLER_SPEED = 100;
+static const int BAKETU3_ROLLER_SPEED = 100;
 static const int ROLLER_STOP = 0;
 
 uint32_t time3 = 0;
@@ -194,52 +194,49 @@ void roller(void) {
         if (Lmayu1 == 1) { // 上ローラー
 
             if (Ltuno1 == 1) {
-                motor_simple_control(ROLLER_STOP, 20, 970, &pwm5);
-                motor_simple_control(ROLLER_STOP, 20, 970, &pwm6);
+                motor_simple_control(ROLLER_STOP, 5, 245, &pwm5);
+                motor_simple_control(ROLLER_STOP, 5, 245, &pwm6);
 
-                motor_control(BAKETU3_ROLLER_SPEED, PV5, 15, 20, 970, &pwm8, &dummy, &rem8);
-                motor_control(BAKETU3_ROLLER_SPEED, PV6, 15, 20, 970, &pwm9, &dummy, &rem9);
+                motor_control(BAKETU3_ROLLER_SPEED, PV5, 5, 20, 245, &pwm8, &dummy, &rem8);
+                motor_control(BAKETU3_ROLLER_SPEED, PV6, 5, 20, 245, &pwm9, &dummy, &rem9);
             }
 
             else if (Ltuno1 == 0) {
-                motor_simple_control(ROLLER_STOP, 20, 970, &pwm5);
-                motor_simple_control(ROLLER_STOP, 20, 970, &pwm6);
+                motor_simple_control(ROLLER_STOP, 5, 245, &pwm5);
+                motor_simple_control(ROLLER_STOP, 5, 245, &pwm6);
 
-                motor_control(BAKETU1_ROLLER_SPEED, PV5, 15, 20, 970, &pwm8, &dummy, &rem8);
-                motor_control(BAKETU1_ROLLER_SPEED, PV6, 15, 20, 970, &pwm9, &dummy, &rem9);
+                motor_control(BAKETU1_ROLLER_SPEED, PV5, 5, 20, 245, &pwm8, &dummy, &rem8);
+                motor_control(BAKETU1_ROLLER_SPEED, PV6, 5, 20, 245, &pwm9, &dummy, &rem9);
 
             }
 
             else if (Ltuno1 == -1) {
-                motor_simple_control(ROLLER_STOP, 20, 970, &pwm5);
-                motor_simple_control(ROLLER_STOP, 20, 970, &pwm6);
+                motor_simple_control(ROLLER_STOP, 5, 245, &pwm5);
+                motor_simple_control(ROLLER_STOP, 5, 245, &pwm6);
 
-                motor_control(BAKETU2_ROLLER_SPEED, PV5, 15, 20, 970, &pwm8, &dummy, &rem8);
-                motor_control(BAKETU2_ROLLER_SPEED, PV6, 15, 20, 970, &pwm9, &dummy, &rem9);
+                motor_control(BAKETU2_ROLLER_SPEED, PV5, 5, 20, 245, &pwm8, &dummy, &rem8);
+                motor_control(BAKETU2_ROLLER_SPEED, PV6, 5, 20, 245, &pwm9, &dummy, &rem9);
             }
         } else if (Lmayu1 == 0) { // 下ローラー
 
-            motor_simple_control(ROLLER_SPEED, 20, 970, &pwm5);
-            motor_simple_control(ROLLER_SPEED, 20, 970, &pwm6);
+            motor_simple_control(ROLLER_SPEED, 5, 245, &pwm5);
+            motor_simple_control(ROLLER_SPEED, 5, 245, &pwm6);
 
-            motor_control(ROLLER_STOP, PV5, 15, 20, 970, &pwm8, &dummy, &rem8);
-            motor_control(ROLLER_STOP, PV6, 15, 20, 970, &pwm9, &dummy, &rem9);
+            motor_control(ROLLER_STOP, PV5, 5, 20, 245, &pwm8, &dummy, &rem8);
+            motor_control(ROLLER_STOP, PV6, 5, 20, 245, &pwm9, &dummy, &rem9);
         }
 
         break;
 
     case 0: // ローラー停止
-        stop_flag1 = 0;
-        stop_flag2 = 0;
-        timer_flag = 0;
         pwm7 = 0;
         pwm10 = 0;
 
-        motor_control(ROLLER_STOP, PV5, 20, 20, 970, &pwm8, &dummy, &rem8);
-        motor_control(ROLLER_STOP, PV6, 20, 20, 970, &pwm9, &dummy, &rem9);
+        motor_control(ROLLER_STOP, PV5, 5, 20, 245, &pwm8, &dummy, &rem8);
+        motor_control(ROLLER_STOP, PV6, 5, 20, 245, &pwm9, &dummy, &rem9);
 
-        motor_simple_control(ROLLER_STOP, 20, 970, &pwm5);
-        motor_simple_control(ROLLER_STOP, 20, 970, &pwm6);
+        motor_simple_control(ROLLER_STOP, 5, 245, &pwm5);
+        motor_simple_control(ROLLER_STOP, 5, 245, &pwm6);
 
         break;
     }
@@ -332,15 +329,6 @@ void safety(void) {
         pwm8 = 0;
         pwm9 = 0;
         pwm10 = 0;
-    } else if (lidar_timeout()) {
-        // 操縦はできるが自動モードが使えない状態。緑を点滅させて知らせる
-        HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, blink_state); // green
-        HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, 0);           // blue
-        HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, 0);           // red
-    } else {                                                    // 全て正常な場合は緑点灯
-        HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, 1);           // green
-        HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, 0);           // blue
-        HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, 0);           // red
     }
     // ローラーと足回りが同時に動かないようにする
     if (pwm5 > 0 || pwm6 > 0 || pwm8 > 0 || pwm9 > 0) {
@@ -354,12 +342,29 @@ void safety(void) {
         pwm9 = 0;
     }
 
-    if (sbus_error == 1) { // SBUSが来ていない場合青点滅
-        HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, 0);
-        HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, blink_state);
+    /*
+     * LEDは「点灯状態を全部決めてから3本まとめて書く」。
+     * 条件ごとにその場で WritePin すると、条件が変わったときに前の色を
+     * 消し忘れて赤と青が同時に点く、といった消え残りが起きる。
+     *
+     * 青点滅 = SBUS断、赤点滅 = CAN断（両方落ちていれば紫点滅になる）、
+     * 緑点滅 = Lidar断で自動モードが使えない、緑点灯 = 全て正常。
+     */
+    uint8_t green = 0;
+    uint8_t blue = 0;
+    uint8_t red = 0;
+
+    if (sbus_error == 1) {
+        blue = blink_state;
     }
-    if (can_error == 1) { // CANが来ていない場合赤点滅
-        HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, 0);
-        HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, blink_state);
+    if (can_error == 1) {
+        red = blink_state;
     }
+    if (sbus_error == 0 && can_error == 0) {
+        green = lidar_timeout() ? blink_state : 1;
+    }
+
+    HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, green);
+    HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, blue);
+    HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, red);
 }

@@ -43,8 +43,6 @@ extern int rem11;
 extern int rem12;
 
 
-extern int stop_flag1;
-extern int stop_flag2;
 extern int timer_flag;
 extern int reset_flag1;
 extern int reset_flag2;
