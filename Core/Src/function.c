@@ -179,10 +179,8 @@ void motor_simple_control(int SV, int step, int max_pwm, int *pwmm) {
 static const int ROLLER_SPEED = 960;
 static const int BAKETU1_ROLLER_SPEED = 450;
 static const int BAKETU2_ROLLER_SPEED = 450;
+static const int BAKETU3_ROLLER_SPEED = 450;
 static const int ROLLER_STOP = 0;
-static const int ROLLER_SPIN_NORMAL_PWM = 600;
-static const int ROLLER_SPIN_REVERSE_PWM = 600;
-static const int REVERCE_TIME = 2000; // リセット時に逆転させる時間(ms)
 
 uint32_t time3 = 0;
 uint32_t time4 = 0;
@@ -191,122 +189,59 @@ int set_flag1 = 0;
 int set_flag2 = 0;
 void roller(void) {
     switch (Lmayu2) {
-    case 1:
+    case 1: // ローラー回転
 
-        if (Ltuno1 == 1) {
-            motor_simple_control(ROLLER_SPEED, 10, 970, &pwm5);
-            motor_simple_control(ROLLER_SPEED, 10, 970, &pwm6);
+        if (Lmayu1 == 1) { // 上ローラー
+
+            if (Ltuno1 == 1) {
+                motor_simple_control(ROLLER_STOP, 20, 970, &pwm5);
+                motor_simple_control(ROLLER_STOP, 20, 970, &pwm6);
+
+                motor_control(BAKETU3_ROLLER_SPEED, PV5, 15, 20, 970, &pwm8, &dummy, &rem8);
+                motor_control(BAKETU3_ROLLER_SPEED, PV6, 15, 20, 970, &pwm9, &dummy, &rem9);
+            }
+
+            else if (Ltuno1 == 0) {
+                motor_simple_control(ROLLER_STOP, 20, 970, &pwm5);
+                motor_simple_control(ROLLER_STOP, 20, 970, &pwm6);
+
+                motor_control(BAKETU1_ROLLER_SPEED, PV5, 15, 20, 970, &pwm8, &dummy, &rem8);
+                motor_control(BAKETU1_ROLLER_SPEED, PV6, 15, 20, 970, &pwm9, &dummy, &rem9);
+
+            }
+
+            else if (Ltuno1 == -1) {
+                motor_simple_control(ROLLER_STOP, 20, 970, &pwm5);
+                motor_simple_control(ROLLER_STOP, 20, 970, &pwm6);
+
+                motor_control(BAKETU2_ROLLER_SPEED, PV5, 15, 20, 970, &pwm8, &dummy, &rem8);
+                motor_control(BAKETU2_ROLLER_SPEED, PV6, 15, 20, 970, &pwm9, &dummy, &rem9);
+            }
+        } else if (Lmayu1 == 0) { // 下ローラー
+
+            motor_simple_control(ROLLER_SPEED, 20, 970, &pwm5);
+            motor_simple_control(ROLLER_SPEED, 20, 970, &pwm6);
 
             motor_control(ROLLER_STOP, PV5, 15, 20, 970, &pwm8, &dummy, &rem8);
             motor_control(ROLLER_STOP, PV6, 15, 20, 970, &pwm9, &dummy, &rem9);
-            pwm7 = ROLLER_SPIN_NORMAL_PWM;
-            pwm10 = 0;
-            roller_dir1 = 1; // 正転
-            if (stop_flag1 == 1) {
-                pwm7 = 0;
-            }
-        }
-
-        else if (Ltuno1 == 0) {
-            motor_simple_control(ROLLER_STOP, 20, 970, &pwm5);
-            motor_simple_control(ROLLER_STOP, 20, 970, &pwm6);
-
-            motor_control(BAKETU1_ROLLER_SPEED, PV5, 15, 20, 970, &pwm8, &dummy, &rem8);
-            motor_control(BAKETU1_ROLLER_SPEED, PV6, 15, 20, 970, &pwm9, &dummy, &rem9);
-            pwm7 = 0;
-            pwm10 = ROLLER_SPIN_NORMAL_PWM;
-            
-            roller_dir2 = 1; // 正転
-
-            if (stop_flag2 == 1) {
-                pwm10 = 0;
-            }
-        }
-
-        else if (Ltuno1 == -1) {
-            motor_simple_control(ROLLER_STOP, 20, 970, &pwm5);
-            motor_simple_control(ROLLER_STOP, 20, 970, &pwm6);
-            motor_control(BAKETU2_ROLLER_SPEED, PV5, 15, 20, 970, &pwm8, &dummy, &rem8);
-            motor_control(BAKETU2_ROLLER_SPEED, PV6, 15, 20, 970, &pwm9, &dummy, &rem9);
-            pwm7 = 0;
-            pwm10 = ROLLER_SPIN_NORMAL_PWM;
-            roller_dir2 = 1; // 正転
-
-            if (stop_flag2 == 1) {
-                pwm10 = 0;
-            }
         }
 
         break;
 
-    case 0:
+    case 0: // ローラー停止
         stop_flag1 = 0;
         stop_flag2 = 0;
         timer_flag = 0;
         pwm7 = 0;
         pwm10 = 0;
 
-        if (Ltuno1 == 1) {
-            motor_control(ROLLER_STOP, PV5, 20, 20, 970, &pwm8, &dummy, &rem8);
-            motor_control(ROLLER_STOP, PV6, 20, 20, 970, &pwm9, &dummy, &rem9);
-            motor_simple_control(ROLLER_SPEED, 20, 970, &pwm5);
-            motor_simple_control(ROLLER_SPEED, 20, 970, &pwm6);
-        }
-
-        else if (Ltuno1 == 0) {
-            motor_simple_control(ROLLER_STOP, 20, 970, &pwm5);
-            motor_simple_control(ROLLER_STOP, 20, 970, &pwm6);
-            motor_control(BAKETU1_ROLLER_SPEED, PV5, 20, 20, 970, &pwm8, &dummy, &rem8);
-            motor_control(BAKETU1_ROLLER_SPEED, PV6, 20, 20, 970, &pwm9, &dummy, &rem9);
-        }
-
-        else if (Ltuno1 == -1) {
-            motor_simple_control(ROLLER_STOP, 20, 970, &pwm5);
-            motor_simple_control(ROLLER_STOP, 20, 970, &pwm6);
-            motor_control(BAKETU2_ROLLER_SPEED, PV5, 20, 20, 970, &pwm8, &dummy, &rem8);
-            motor_control(BAKETU2_ROLLER_SPEED, PV6, 20, 20, 970, &pwm9, &dummy, &rem9);
-        }
-        break;
-
-    case -1:
-
-        stop_flag1 = 0;
-        stop_flag2 = 0;
-        timer_flag = 0;
-        pwm7 = 0;
-        pwm10 = 0;
+        motor_control(ROLLER_STOP, PV5, 20, 20, 970, &pwm8, &dummy, &rem8);
+        motor_control(ROLLER_STOP, PV6, 20, 20, 970, &pwm9, &dummy, &rem9);
 
         motor_simple_control(ROLLER_STOP, 20, 970, &pwm5);
         motor_simple_control(ROLLER_STOP, 20, 970, &pwm6);
-        motor_control(ROLLER_STOP, PV5, 20, 20, 970, &pwm8, &dummy, &rem8);
-        motor_control(ROLLER_STOP, PV6, 20, 20, 970, &pwm9, &dummy, &rem9);
+
         break;
-    }
-    // set_flag は「今リセット逆転中か」を示す。これが無いと下のif/elseが常に成立し、
-    // switch内で立てた正転指令(pwm7/pwm10)を毎周期上書きしてしまう
-    if (reset_flag1 == 1 && set_flag1 == 0) {
-        reset_flag1 = 0;
-        set_flag1 = 1;
-        time4 = now;
-    }
-    if (now - time4 <= REVERCE_TIME && set_flag1 == 1) {
-        pwm7 = ROLLER_SPIN_REVERSE_PWM;
-        roller_dir1 = 0; // 逆転
-    } else if (now - time4 > REVERCE_TIME && set_flag1 == 1) {
-        pwm7 = 0;
-        set_flag1 = 0;
-    }
-    if (reset_flag2 == 1 && set_flag2 == 0) {
-        reset_flag2 = 0;
-        set_flag2 = 1;
-        time5 = now;
-    }
-    if (now - time5 <= REVERCE_TIME && set_flag2 == 1) {
-        pwm10 = ROLLER_SPIN_REVERSE_PWM;
-        roller_dir2 = 0; // 逆転
-    } else if (now - time5 > REVERCE_TIME && set_flag2 == 1) {
-        pwm10 = 0;
-        set_flag2 = 0;
     }
 }
 

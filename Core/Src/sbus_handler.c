@@ -106,7 +106,7 @@ void sbus(void){
     Lmayu2 = get_switch_state2(SBUS_CH[5]);
     Rmayu1 = get_switch_state3(SBUS_CH[6]);
     Rmayu2 = get_switch_state2(SBUS_CH[7]);
-    Ltuno2 = get_switch_state3(SBUS_CH[8]);
+    Ltuno1 = get_switch_state3(SBUS_CH[8]);
     Rtuno2 = get_switch_state2(SBUS_CH[9]);
 
     rx = process_stick(SBUS_CH[0]);
