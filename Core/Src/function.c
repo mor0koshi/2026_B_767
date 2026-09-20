@@ -9,6 +9,7 @@
 #include "function.h"
 #include "lidar_sensor.h" /* safety() で lidar_timeout() を使用するため */
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 int _write(int file, char *ptr, int len) {
@@ -114,7 +115,7 @@ void motor_control(int SV, int PV, int maxMV, int down_pwm, int max_pwm, int *pw
         lastMV = MV;
     }
 
-    // 回転方向が目標と異なる場合、一旦 pwm を 0 まで落としてから方向を変える
+    // 回転方向が目標と異なる場合,一旦pwmを0まで落としてから方向を変える
     if (SV != 0) {
         if (dir != target_dir) {
             rem = 0; // 方向転換中は端数を捨てる
@@ -150,17 +151,47 @@ void motor_control(int SV, int PV, int maxMV, int down_pwm, int max_pwm, int *pw
     *dirr = dir;
     *remm = rem;
 }
-// 方向反転を考慮しない簡易版。目標値(SV)に向けて1回の呼び出しごとにstepずつpwmを近づける
-void motor_simple_control(int SV, int step, int max_pwm, int *pwmm) {
+/*
+ * エンコーダを使わない簡易版。目標値(SV)に向けて1回の呼び出しごとにstepずつpwmを近づける。
+ * SV の符号が回転方向を表し (負 = dir 0 / 正 = dir 1)、絶対値がそのまま目標 pwm になる。
+ * 方向転換と停止は motor_control と同じ扱いで、どちらも step ずつ pwm を落としてから行う。
+ */
+void motor_simple_control(int SV, int step, int max_pwm, int *pwmm, int *dirr) {
     int pwm = *pwmm;
+    int dir = *dirr;
+    int target_dir = dir;
 
+    // リミッター処理
     if (SV > max_pwm) {
         SV = max_pwm;
-    } else if (SV < 0) {
-        SV = 0;
+    } else if (SV < -max_pwm) {
+        SV = -max_pwm;
     }
 
-    if (pwm < SV) {
+    // dir設定と絶対値化
+    if (SV < 0) {
+        target_dir = 0;
+        SV = -SV;
+    } else if (SV > 0) {
+        target_dir = 1;
+    }
+
+    if (SV == 0) {
+        // 指令値が 0 のときは緩やかにモーターを停止させる
+        if (pwm > step) {
+            pwm -= step;
+        } else {
+            pwm = 0;
+        }
+    } else if (dir != target_dir) {
+        // 回転方向が目標と異なる場合、一旦 pwm を 0 まで落としてから方向を変える
+        if (pwm > step) {
+            pwm -= step;
+        } else {
+            pwm = 0;
+            dir = target_dir;
+        }
+    } else if (pwm < SV) {
         pwm += step;
         if (pwm > SV) {
             pwm = SV;
@@ -173,13 +204,14 @@ void motor_simple_control(int SV, int step, int max_pwm, int *pwmm) {
     }
 
     *pwmm = pwm;
+    *dirr = dir;
 }
 
 // マジックナンバーを意味のある定数に置き換えます
-static const int ROLLER_SPEED = 240;
+static const int ROLLER_SPEED = 990;
 static const int BAKETU1_ROLLER_SPEED = 100;
-static const int BAKETU2_ROLLER_SPEED = 100;
-static const int BAKETU3_ROLLER_SPEED = 100;
+static const int BAKETU2_ROLLER_SPEED = 150;
+static const int BAKETU3_ROLLER_SPEED = 200;
 static const int ROLLER_STOP = 0;
 
 uint32_t time3 = 0;
@@ -187,6 +219,12 @@ uint32_t time4 = 0;
 uint32_t time5 = 0;
 int set_flag1 = 0;
 int set_flag2 = 0;
+/*
+ * モーター割り当て (2026/09 のモーター載せ替え後)
+ *   上ローラー : pwm5 / pwm7  (エンコーダ PV1 / PV2 付きの閉ループ)
+ *   下ローラー : pwm6 / pwm8  (エンコーダ PV3 / PV4 付きの閉ループ)
+ *   装填       : pwm9 (装填1) / pwm10 (装填2) ... main.c の電磁弁処理で駆動
+ */
 void roller(void) {
     switch (Lmayu2) {
     case 1: // ローラー回転
@@ -194,49 +232,60 @@ void roller(void) {
         if (Lmayu1 == 1) { // 上ローラー
 
             if (Ltuno1 == 1) {
-                motor_simple_control(ROLLER_STOP, 5, 245, &pwm5);
-                motor_simple_control(ROLLER_STOP, 5, 245, &pwm6);
+                motor_control(BAKETU3_ROLLER_SPEED, PV1, 5, 20, 245, &pwm5, &dummy, &rem5);
+                motor_control(BAKETU3_ROLLER_SPEED, PV2, 5, 20, 245, &pwm7, &dummy, &rem7);
 
-                motor_control(BAKETU3_ROLLER_SPEED, PV5, 5, 20, 245, &pwm8, &dummy, &rem8);
-                motor_control(BAKETU3_ROLLER_SPEED, PV6, 5, 20, 245, &pwm9, &dummy, &rem9);
+                motor_control(ROLLER_STOP,PV3, 5, 20,245, &pwm6, &dummy, &rem6);
+                motor_control(ROLLER_STOP,PV4, 5, 20,245, &pwm8, &dummy, &rem8);
+
+
             }
 
             else if (Ltuno1 == 0) {
-                motor_simple_control(ROLLER_STOP, 5, 245, &pwm5);
-                motor_simple_control(ROLLER_STOP, 5, 245, &pwm6);
 
-                motor_control(BAKETU1_ROLLER_SPEED, PV5, 5, 20, 245, &pwm8, &dummy, &rem8);
-                motor_control(BAKETU1_ROLLER_SPEED, PV6, 5, 20, 245, &pwm9, &dummy, &rem9);
+                motor_control(BAKETU2_ROLLER_SPEED, PV1, 5, 20, 245, &pwm5, &dummy, &rem5);
+                motor_control(BAKETU2_ROLLER_SPEED, PV2, 5, 20, 245, &pwm7, &dummy, &rem7);
+
+                motor_control(ROLLER_STOP,PV3, 5, 20,245, &pwm6, &dummy, &rem6);
+                motor_control(ROLLER_STOP,PV4, 5, 20,245, &pwm8, &dummy, &rem8);
+
+
 
             }
 
             else if (Ltuno1 == -1) {
-                motor_simple_control(ROLLER_STOP, 5, 245, &pwm5);
-                motor_simple_control(ROLLER_STOP, 5, 245, &pwm6);
 
-                motor_control(BAKETU2_ROLLER_SPEED, PV5, 5, 20, 245, &pwm8, &dummy, &rem8);
-                motor_control(BAKETU2_ROLLER_SPEED, PV6, 5, 20, 245, &pwm9, &dummy, &rem9);
+                motor_control(BAKETU1_ROLLER_SPEED, PV1, 5, 20, 245, &pwm5, &dummy, &rem5);
+                motor_control(BAKETU1_ROLLER_SPEED, PV2, 5, 20, 245, &pwm7, &dummy, &rem7);
+
+                motor_control(ROLLER_STOP,PV3, 5, 20,245, &pwm6, &dummy, &rem6);
+                motor_control(ROLLER_STOP,PV4, 5, 20,245, &pwm8, &dummy, &rem8);
+
+
             }
         } else if (Lmayu1 == 0) { // 下ローラー
 
-            motor_simple_control(ROLLER_SPEED, 5, 245, &pwm5);
-            motor_simple_control(ROLLER_SPEED, 5, 245, &pwm6);
+            motor_control(ROLLER_STOP, PV1, 5, 20, 245, &pwm5, &dummy, &rem5);
+            motor_control(ROLLER_STOP, PV2, 5, 20, 245, &pwm7, &dummy, &rem7);
 
-            motor_control(ROLLER_STOP, PV5, 5, 20, 245, &pwm8, &dummy, &rem8);
-            motor_control(ROLLER_STOP, PV6, 5, 20, 245, &pwm9, &dummy, &rem9);
+            motor_control(ROLLER_STOP, PV3, 5, 20, 245, &pwm6, &dummy, &rem6);
+            motor_control(ROLLER_STOP, PV4, 5, 20, 245, &pwm8, &dummy, &rem8);
+
+
         }
 
         break;
 
     case 0: // ローラー停止
-        pwm7 = 0;
+        // 装填
+        pwm9 = 0;
         pwm10 = 0;
 
-        motor_control(ROLLER_STOP, PV5, 5, 20, 245, &pwm8, &dummy, &rem8);
-        motor_control(ROLLER_STOP, PV6, 5, 20, 245, &pwm9, &dummy, &rem9);
+        motor_control(ROLLER_STOP, PV1, 5, 20, 245, &pwm5, &dummy, &rem5);
+        motor_control(ROLLER_STOP, PV2, 5, 20, 245, &pwm7, &dummy, &rem7);
 
-        motor_simple_control(ROLLER_STOP, 5, 245, &pwm5);
-        motor_simple_control(ROLLER_STOP, 5, 245, &pwm6);
+        motor_control(ROLLER_STOP, PV3, 5, 20, 245, &pwm6, &dummy, &rem6);
+        motor_control(ROLLER_STOP, PV4, 5, 20, 245, &pwm8, &dummy, &rem8);
 
         break;
     }
@@ -330,16 +379,28 @@ void safety(void) {
         pwm9 = 0;
         pwm10 = 0;
     }
-    // ローラーと足回りが同時に動かないようにする
-    if (pwm5 > 0 || pwm6 > 0 || pwm8 > 0 || pwm9 > 0) {
-        pwm1 = 0;
-        pwm2 = 0;
-        pwm3 = 0;
-        pwm4 = 0;
+    // ローラーと足回りが同時に全力で回らないようにする（電源の取り合い対策）
+    // 足回り(pwm1〜pwm4)が1つでも回っている間は、ローラー(pwm5〜pwm8)を100で頭打ちにする。
+    // motor_simple_control は停止指令のとき必ず 0 まで落とすので、
+    // 停止中の足回りを「回っている」と誤判定することはない。
+    if (pwm1 > 0 || pwm2 > 0 || pwm3 > 0 || pwm4 > 0) {
+        if (pwm5 > 100) {
+            pwm5 = 100;
+        }
+        if (pwm6 > 100) {
+            pwm6 = 100;
+        }
+        if (pwm7 > 100) {
+            pwm7 = 100;
+        }
+        if (pwm8 > 100) {
+            pwm8 = 100;
+        }
     }
-    if (pwm5 > 0 || pwm6 > 0) {
-        pwm8 = 0;
-        pwm9 = 0;
+    // 下ローラーが回っている間は上ローラーを止める
+    if (pwm6 >= 100 || pwm8 >= 100) {
+        pwm5 = 0;
+        pwm7 = 0;
     }
 
     /*
@@ -367,4 +428,29 @@ void safety(void) {
     HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, green);
     HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, blue);
     HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, red);
+}
+
+/*
+ * リミットスイッチの読み取り (チャタリング/ノイズ除去)
+ *
+ * reset_flag は「一度 Low を読んだら立つ」「lock7/lock9 を踏むまで下りない」という
+ * ラッチ構造なので、モーターのPWMノイズが 1 スキャン乗っただけで装填が回りっぱなしになる。
+ * LIMIT_DEBOUNCE_MS の間 同じ値を読み続けたときだけ確定値を更新することで、
+ * 単発のノイズをフラグまで通さない。
+ */
+#define LIMIT_DEBOUNCE_MS 20
+
+uint8_t limit_read(limit_sw *sw) {
+    uint8_t raw = (uint8_t)HAL_GPIO_ReadPin(sw->port, sw->pin);
+
+    if (raw != sw->last) {
+        // 値が動いた。ここから改めて安定時間を計り直す
+        sw->last = raw;
+        sw->changed = HAL_GetTick();
+    } else if (raw != sw->stable && HAL_GetTick() - sw->changed >= LIMIT_DEBOUNCE_MS) {
+        // 同じ値を十分な時間読み続けたので確定
+        sw->stable = raw;
+    }
+
+    return sw->stable;
 }

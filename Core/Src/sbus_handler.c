@@ -114,9 +114,9 @@ void sbus(void){
     ry = process_stick(SBUS_CH[2]);
     lx = process_stick(SBUS_CH[3]);
 
-    m1 =  ly - lx - rx; // 左前 (Front Left)
+    m1 =  -ly + lx - rx; // 左前 (Front Left)
     m2 = -ly - lx - rx; // 右前 (Front Right)
-    m3 = -ly + lx - rx; // 左後 (Rear Left)
+    m3 = ly - lx - rx; // 左後 (Rear Left)
     m4 =  ly + lx - rx; // 右後 (Rear Right)
 
     // モーターの値を0.7倍して減速させる

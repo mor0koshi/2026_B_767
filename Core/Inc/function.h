@@ -12,6 +12,9 @@ extern "C" {
 /* ペリフェラルハンドル (main.c で定義) */
 extern CAN_HandleTypeDef hcan1;
 extern UART_HandleTypeDef huart3;
+extern TIM_HandleTypeDef htim1;
+extern TIM_HandleTypeDef htim3;
+extern TIM_HandleTypeDef htim4;
 
 /* 共有変数 (main.c で定義) */
 extern volatile int16_t PV5;
@@ -66,11 +69,28 @@ int _write(int file, char *ptr, int len);
 void CAN_TX(uint32_t recipient);
 
 void motor_control(int SV, int PV, int maxMV, int down_pwm, int max_pwm, int *pwmm, int *dirr,int *remm);
-void motor_simple_control(int SV, int step, int max_pwm, int *pwmm);
+void motor_simple_control(int SV, int step, int max_pwm, int *pwmm, int *dirr);
 
 void roller(void);
 void auto_mode(int distance1, int distance2, int reset_flag, int target_dist);
 void safety(void);
+/*
+ * リミットスイッチ入力のノイズ除去用。
+ * モーターのPWMノイズで一瞬 Low を読んだだけでフラグが立つのを防ぐ。
+ * port/pin だけ初期化し、残り (stable/last/changed) は LIMIT_SW_INIT で埋めること。
+ */
+typedef struct {
+    GPIO_TypeDef *port;
+    uint16_t pin;
+    uint8_t stable;   // ノイズ除去後の確定値
+    uint8_t last;     // 前回の生の読み値
+    uint32_t changed; // 生の読み値が変わった時刻
+} limit_sw;
+
+// プルアップ入力なので未押下 (High=1) を初期値にする
+#define LIMIT_SW_INIT(port, pin) {(port), (pin), 1, 1, 0}
+
+uint8_t limit_read(limit_sw *sw);
 
 #ifdef __cplusplus
 }
