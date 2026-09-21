@@ -182,6 +182,7 @@ uint8_t sbus_frame[SBUS_FRAME_LEN];
 volatile uint16_t SBUS_CH[16];
 uint8_t SBUS_Failsafe = 0;
 uint8_t SBUS_LostFrame = 0;
+uint32_t last_sbus_rx = 0; // 最後にSBUSフレームをデコードできた時刻
 
 // RX割り込みコールバック関数で使用
 volatile uint8_t use_data[8];
@@ -342,9 +343,11 @@ int main(void)
             } else if (Rmayu1 == 0) {
                 auto_mode(distance4 - LIDAR_OFFSET4, distance7 - LIDAR_OFFSET7, 0,
                           (distance4 + distance7 - (LIDAR_OFFSET4 + LIDAR_OFFSET7)) / 2);
-                int gauto_m1 = ly - lx + auto_rx;
+                // sbus() の m1〜m4 と同じ式で、rx だけ PID の auto_rx に差し替える。
+                // 式を変えるときは sbus_handler.c と必ず揃えること。
+                int gauto_m1 = -ly + lx + auto_rx;
                 int gauto_m2 = -ly - lx + auto_rx;
-                int gauto_m3 = -ly + lx + auto_rx;
+                int gauto_m3 = ly - lx + auto_rx;
                 int gauto_m4 = ly + lx + auto_rx;
 
                 motor_simple_control(gauto_m1,80, maxpwm, &pwm1, &dir1);
@@ -357,9 +360,9 @@ int main(void)
                 auto_mode(distance4 - LIDAR_OFFSET4, distance7 - LIDAR_OFFSET7, 0, AUTO_TARGET_DIST_MM);
 
                 // 自動計算された ly, rx を使って m1〜m4 を計算（あなたの式を再利用！）
-                int auto_m1 = -auto_ly - lx + auto_rx;
+                int auto_m1 = auto_ly + lx + auto_rx;
                 int auto_m2 = auto_ly - lx + auto_rx;
-                int auto_m3 = auto_ly + lx + auto_rx;
+                int auto_m3 = -auto_ly - lx + auto_rx;
                 int auto_m4 = -auto_ly + lx + auto_rx;
 
                 // 計算結果をモーターに出力
@@ -444,14 +447,14 @@ int main(void)
         __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pwm6); // m6 下ローラー = 基板ch8 (PWM8=PE9)
         HAL_GPIO_WritePin(d8_GPIO_Port, d8_Pin, 0);                // DIR8 = PF13
         __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, pwm7); // m7 上ローラー = 基板ch5 (PWM5=PE13)
-        HAL_GPIO_WritePin(d5_GPIO_Port, d5_Pin, 0);                // DIR5 = PF3
+        HAL_GPIO_WritePin(d5_GPIO_Port, d5_Pin, 1);                // DIR5 = PF3
         __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_4, pwm8); // m8 下ローラー = 基板ch6 (PWM6=PE14)
         HAL_GPIO_WritePin(d6_GPIO_Port, d6_Pin, 1);                // DIR6 = PF14
 
         // 装填は正転/逆転リセットがあるので DIR は roller_dir を出す。
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, output_pwm9);  // m9 装填1 = 基板ch10 (PWM10=PC7)
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, pwm9);  // m9 装填1 = 基板ch10 (PWM10=PC7)
         HAL_GPIO_WritePin(d10_GPIO_Port, d10_Pin, roller_dir1);     // DIR10 = PA11
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, output_pwm10); // m10 装填2 = 基板ch9 (PWM9=PC6)
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pwm10); // m10 装填2 = 基板ch9 (PWM9=PC6)
         HAL_GPIO_WritePin(d9_GPIO_Port, d9_Pin, roller_dir2);       // DIR9 = PA12
         // __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, pwm11); // m11 = 基板ch11 (PWM11=PC8)
         // HAL_GPIO_WritePin(d11_GPIO_Port, d11_Pin, roller_dir); // DIR11 = PB12

@@ -70,6 +70,11 @@ void SBUS_Process(void) {
 
     SBUS_LostFrame = (sbus_frame[23] >> 2) & 0x01;
     SBUS_Failsafe = (sbus_frame[23] >> 3) & 0x01;
+
+    // 受信が完全に途絶えたことを safety() が検出できるようにする。
+    // SBUS_CH や SBUS_LostFrame はフレームが来たときしか更新されないので、
+    // 信号が消えると古い値のまま固まり、それ単体では断線を判定できない。
+    last_sbus_rx = HAL_GetTick();
 }
 
 // SBUS用のヘルパー関数
@@ -94,7 +99,7 @@ int process_stick(int ch_value) {
     if (ch_value > 1000 && ch_value < 1050){
       ch_value = 1024;
     }
-    int mapped = map(ch_value, 368, 1680, -255, 255);
+    int mapped = map(ch_value, 368, 1680, -1000, 1000);
     if (mapped <= 2 && mapped >= -2){
       return 0; // デッドバンド
     }

@@ -9,6 +9,12 @@ extern "C" {
 #include "sbus.h"
 #include <stdint.h>
 
+/*
+ * 最後にSBUSフレームをデコードできた時刻から何ms経ったら受信断とみなすか。
+ * SBUSは14ms(ハイスピードなら7ms)周期なので、100msは約7フレーム分の猶予。
+ */
+#define SBUS_TIMEOUT_MS 100
+
 /* ペリフェラルハンドル (main.c で定義) */
 extern UART_HandleTypeDef huart5;
 
@@ -18,6 +24,7 @@ extern uint8_t sbus_frame[SBUS_FRAME_LEN];
 extern volatile uint16_t SBUS_CH[16];
 extern uint8_t SBUS_Failsafe;
 extern uint8_t SBUS_LostFrame;
+extern uint32_t last_sbus_rx;
 
 /* スティック・スイッチ加工後の値 (main.c で定義) */
 extern int rx;

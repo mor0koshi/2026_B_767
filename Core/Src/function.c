@@ -208,7 +208,7 @@ void motor_simple_control(int SV, int step, int max_pwm, int *pwmm, int *dirr) {
 }
 
 // マジックナンバーを意味のある定数に置き換えます
-static const int ROLLER_SPEED = 990;
+static const int ROLLER_SPEED = 245;
 static const int BAKETU1_ROLLER_SPEED = 100;
 static const int BAKETU2_ROLLER_SPEED = 150;
 static const int BAKETU3_ROLLER_SPEED = 200;
@@ -223,7 +223,7 @@ int set_flag2 = 0;
  * モーター割り当て (2026/09 のモーター載せ替え後)
  *   上ローラー : pwm5 / pwm7  (エンコーダ PV1 / PV2 付きの閉ループ)
  *   下ローラー : pwm6 / pwm8  (エンコーダ PV3 / PV4 付きの閉ループ)
- *   装填       : pwm9 (装填1) / pwm10 (装填2) ... main.c の電磁弁処理で駆動
+ *   装填       : pwm9 (装填1) / pwm10 (装填2) 
  */
 void roller(void) {
     switch (Lmayu2) {
@@ -268,8 +268,8 @@ void roller(void) {
             motor_control(ROLLER_STOP, PV1, 5, 20, 245, &pwm5, &dummy, &rem5);
             motor_control(ROLLER_STOP, PV2, 5, 20, 245, &pwm7, &dummy, &rem7);
 
-            motor_control(ROLLER_STOP, PV3, 5, 20, 245, &pwm6, &dummy, &rem6);
-            motor_control(ROLLER_STOP, PV4, 5, 20, 245, &pwm8, &dummy, &rem8);
+            motor_control(ROLLER_SPEED, PV3, 5, 20, 245, &pwm6, &dummy, &rem6);
+            motor_control(ROLLER_SPEED, PV4, 5, 20, 245, &pwm8, &dummy, &rem8);
 
 
         }
@@ -355,8 +355,21 @@ void safety(void) {
     int can_error = 0;
     uint8_t blink_state = (now / 300) % 2;
 
-    // Failsafe は「受信機が送信機を見失った」決定的な信号なので必ず見る
-    if (SBUS_CH[0] == 0 || SBUS_LostFrame) {
+    /*
+     * SBUS断の判定は3つを併用する。
+     *   1. last_sbus_rx のタイムアウト … 受信が完全に途絶えた場合。
+     *      SBUS_CH も SBUS_LostFrame もフレームが来たときしか更新されないため、
+     *      コネクタが抜けると古い値のまま固まる。これが無いと直前のスティック
+     *      指令のまま走り続けてしまう。
+     *   2. SBUS_Failsafe … 「受信機が送信機を見失った」決定的な信号。
+     *      送信機の電源を切っても受信機は正常なフレームを送り続け、このビット
+     *      だけを立てるので、1 でも 3 でも捕まえられない。
+     *   3. SBUS_LostFrame … 単発のフレーム落ち。
+     *   SBUS_CH[0] == 0 は起動直後(まだ1フレームも来ていない)の保険。
+     *   HAL_GetTick() がまだ SBUS_TIMEOUT_MS に満たない間は 1 が効かないため。
+     */
+    if (HAL_GetTick() - last_sbus_rx > SBUS_TIMEOUT_MS || SBUS_Failsafe || SBUS_LostFrame ||
+        SBUS_CH[0] == 0) {
         sbus_error = 1;
     } else {
         sbus_error = 0;
@@ -387,22 +400,16 @@ void safety(void) {
         if (pwm5 > 100) {
             pwm5 = 100;
         }
-        if (pwm6 > 100) {
-            pwm6 = 100;
-        }
         if (pwm7 > 100) {
             pwm7 = 100;
+        }
+        if (pwm6 > 100) {
+            pwm6 = 100;
         }
         if (pwm8 > 100) {
             pwm8 = 100;
         }
     }
-    // 下ローラーが回っている間は上ローラーを止める
-    if (pwm6 >= 100 || pwm8 >= 100) {
-        pwm5 = 0;
-        pwm7 = 0;
-    }
-
     /*
      * LEDは「点灯状態を全部決めてから3本まとめて書く」。
      * 条件ごとにその場で WritePin すると、条件が変わったときに前の色を

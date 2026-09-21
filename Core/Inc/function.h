@@ -17,8 +17,10 @@ extern TIM_HandleTypeDef htim3;
 extern TIM_HandleTypeDef htim4;
 
 /* 共有変数 (main.c で定義) */
-extern volatile int16_t PV5;
-extern volatile int16_t PV6;
+extern volatile int16_t PV1;
+extern volatile int16_t PV2;
+extern volatile int16_t PV3;
+extern volatile int16_t PV4;
 
 extern int pwm1;
 extern int pwm2;
