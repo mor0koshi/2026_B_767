@@ -12,7 +12,6 @@
 
 #define SBUS_FRAME_LEN 64
 
-//extern volatile uint16_t SBUS_CH[16];
 extern uint8_t SBUS_Failsafe;
 extern uint8_t SBUS_LostFrame;
 

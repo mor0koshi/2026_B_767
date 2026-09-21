@@ -12,12 +12,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+// printf の出力先を USART3 にする
 int _write(int file, char *ptr, int len) {
     HAL_UART_Transmit(&huart3, (uint8_t *)ptr, len, 10);
     return len;
 }
 
-// CAN
+// CAN 送信 (固定ペイロード)。現在はどこからも呼ばれていない
 void CAN_TX(uint32_t recipient) {
     // 送信用インスタンス等
     CAN_TxHeaderTypeDef TxHeader;
@@ -46,7 +47,11 @@ void CAN_TX(uint32_t recipient) {
         }
     }
 }
-// RX割り込みコールバック関数
+/*
+ * CAN 受信割り込み。ID 0x001 の 8 バイトをそのまま use_data[] に写す。
+ * use_data[0..3] はメインループで PV1〜PV4 (ローラーのエンコーダ値) になる。
+ * last_can_rx は safety() の CAN 断判定に使う。
+ */
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan1) {
     CAN_RxHeaderTypeDef RxHeader; // 受信メッセージの情報が格納されるインスタンス
     uint8_t RxData[8];            // 受信したデータを一時保存する配列
@@ -63,7 +68,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan1) {
 }
 
 /*
- * 速度制御 (積分制御)
+ * 速度制御 (積分制御)。エンコーダのあるローラーで使う。
  *
  * 積分器は pwm 自身。毎周期 pwm に MV(=誤差の1/10) を足し込むことで、
  * 誤差が 0 になるまで pwm が育っていく。
@@ -152,7 +157,8 @@ void motor_control(int SV, int PV, int maxMV, int down_pwm, int max_pwm, int *pw
     *remm = rem;
 }
 /*
- * エンコーダを使わない簡易版。目標値(SV)に向けて1回の呼び出しごとにstepずつpwmを近づける。
+ * エンコーダを使わない簡易版。足回りで使う。
+ * 目標値(SV)に向けて1回の呼び出しごとにstepずつpwmを近づける。
  * SV の符号が回転方向を表し (負 = dir 0 / 正 = dir 1)、絶対値がそのまま目標 pwm になる。
  * 方向転換と停止は motor_control と同じ扱いで、どちらも step ずつ pwm を落としてから行う。
  */
@@ -207,23 +213,29 @@ void motor_simple_control(int SV, int step, int max_pwm, int *pwmm, int *dirr) {
     *dirr = dir;
 }
 
-// マジックナンバーを意味のある定数に置き換えます
-static const int ROLLER_SPEED = 245;
-static const int BAKETU1_ROLLER_SPEED = 100;
-static const int BAKETU2_ROLLER_SPEED = 150;
-static const int BAKETU3_ROLLER_SPEED = 200;
+// ローラーの目標速度。エンコーダ値 (PV) と同じ 0〜255 系で、TIM1 の Period 254 以下にすること
+static const int ROLLER_SPEED = 245;         // 下ローラー
+static const int BAKETU1_ROLLER_SPEED = 100; // 上ローラー Ltuno1 == -1
+static const int BAKETU2_ROLLER_SPEED = 150; // 上ローラー Ltuno1 == 0
+static const int BAKETU3_ROLLER_SPEED = 200; // 上ローラー Ltuno1 == 1
 static const int ROLLER_STOP = 0;
 
+// 未使用
 uint32_t time3 = 0;
 uint32_t time4 = 0;
 uint32_t time5 = 0;
 int set_flag1 = 0;
 int set_flag2 = 0;
 /*
+ * ローラーの目標速度を決める。20ms 周期で呼ぶこと。
+ *
  * モーター割り当て (2026/09 のモーター載せ替え後)
  *   上ローラー : pwm5 / pwm7  (エンコーダ PV1 / PV2 付きの閉ループ)
  *   下ローラー : pwm6 / pwm8  (エンコーダ PV3 / PV4 付きの閉ループ)
- *   装填       : pwm9 (装填1) / pwm10 (装填2) 
+ *   装填       : pwm9 (装填1) / pwm10 (装填2) … 駆動は main.c。ここではローラー停止時に止めるだけ
+ *
+ * Lmayu2 == 1 のときだけ回す。上下は Lmayu1 で切り替えるので同時には回らない。
+ * 上ローラーの速度は Ltuno1 で選ぶ。
  */
 void roller(void) {
     switch (Lmayu2) {
@@ -231,7 +243,7 @@ void roller(void) {
 
         if (Lmayu1 == 1) { // 上ローラー
 
-            if (Ltuno1 == 1) {
+            if (Ltuno1 == 1) { // 200
                 motor_control(BAKETU3_ROLLER_SPEED, PV1, 5, 20, 245, &pwm5, &dummy, &rem5);
                 motor_control(BAKETU3_ROLLER_SPEED, PV2, 5, 20, 245, &pwm7, &dummy, &rem7);
 
@@ -241,7 +253,7 @@ void roller(void) {
 
             }
 
-            else if (Ltuno1 == 0) {
+            else if (Ltuno1 == 0) { // 150
 
                 motor_control(BAKETU2_ROLLER_SPEED, PV1, 5, 20, 245, &pwm5, &dummy, &rem5);
                 motor_control(BAKETU2_ROLLER_SPEED, PV2, 5, 20, 245, &pwm7, &dummy, &rem7);
@@ -253,7 +265,7 @@ void roller(void) {
 
             }
 
-            else if (Ltuno1 == -1) {
+            else if (Ltuno1 == -1) { // 100
 
                 motor_control(BAKETU1_ROLLER_SPEED, PV1, 5, 20, 245, &pwm5, &dummy, &rem5);
                 motor_control(BAKETU1_ROLLER_SPEED, PV2, 5, 20, 245, &pwm7, &dummy, &rem7);
@@ -291,6 +303,12 @@ void roller(void) {
     }
 }
 
+/*
+ * 2 つの Lidar の距離から、壁との距離と平行を保つ仮想スティック値を計算する。
+ *   auto_ly … 距離 (平均) の PID。前後移動
+ *   auto_rx … 角度 (差分) の PID。旋回
+ * 20ms 周期で呼ぶこと (dt が固定)。reset_flag = 1 で積分をリセットして 0 を返す。
+ */
 void auto_mode(int distance1, int distance2, int reset_flag, int target_dist) {
     typedef struct {
         float Kp;
@@ -323,7 +341,7 @@ void auto_mode(int distance1, int distance2, int reset_flag, int target_dist) {
         return;
     }
 
-    // --- 1. 距離を保つためのPID（縦移動力 ly を計算） ---
+    // --- 1. 距離を保つためのPID（前後移動 auto_ly を計算） ---
     distance.integral += error_dist * dt;
     if (distance.integral > 2000)
         distance.integral = 2000; // 暴走防止
@@ -393,7 +411,8 @@ void safety(void) {
         pwm10 = 0;
     }
     // ローラーと足回りが同時に全力で回らないようにする（電源の取り合い対策）
-    // 足回り(pwm1〜pwm4)が1つでも回っている間は、ローラー(pwm5〜pwm8)を100で頭打ちにする。
+    // 足回り(pwm1〜pwm4)が1つでも回っている間は、ローラー(pwm5〜pwm8)の PWM を
+    // 100 (TIM1 の Period 254 に対して約 40%) で頭打ちにする。速度ではなく PWM の上限。
     // motor_simple_control は停止指令のとき必ず 0 まで落とすので、
     // 停止中の足回りを「回っている」と誤判定することはない。
     if (pwm1 > 0 || pwm2 > 0 || pwm3 > 0 || pwm4 > 0) {

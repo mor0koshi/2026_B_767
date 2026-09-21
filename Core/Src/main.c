@@ -88,35 +88,48 @@ DMA_HandleTypeDef hdma_uart8_rx;
 
 /* USER CODE BEGIN PV */
 
-int rx; // rxスティック
-int ly; // lyスティック
-int ry; // ryスティック
-int lx; // lxスティック
+// スティック (sbus() で ±1000 に変換済み)
+int rx; // 旋回 (CH0)
+int ly; // 前後 (CH1)
+int ry; // 未使用 (CH2)
+int lx; // 左右 (CH3)
 
-int Lmayu1;
-int Lmayu2;
-int Rmayu1;
-int Rmayu2;
-int Ltuno1;
-int Rtuno2;
+// スイッチ (sbus() で変換済み)
+int Lmayu1; // CH4 ローラー選択    1=上ローラー / 0=下ローラー
+int Lmayu2; // CH5 ローラー回転    1=回す / 0=止める
+int Rmayu1; // CH6 走行モード      -1=手動 / 0=半自動 / 1=全自動
+int Rmayu2; // CH7 電磁弁の選択    0=lock1 / 1=lock2
+int Ltuno1; // CH8 上ローラー速度  1=200 / 0=150 / -1=100
+int Rtuno2; // CH9 発射            1=打つ / 0=打たない
 
-volatile int m1;
-volatile int m2;
-volatile int m3;
-volatile int m4;
+// 手動モードのオムニ混合値 (sbus() で計算)
+volatile int m1; // 左前
+volatile int m2; // 右前
+volatile int m3; // 左後
+volatile int m4; // 右後
 
-volatile int16_t PV1 = 0; // 現在値
-volatile int16_t PV2 = 0; // 現在値
-volatile int16_t PV3 = 0; // 現在値
-volatile int16_t PV4 = 0; // 現在値
-volatile int16_t PV5 = 0; // 現在値
-volatile int16_t PV6 = 0; // 現在値
+// CAN (ID 0x001) で受け取るローラーのエンコーダ値。0〜255
+volatile int16_t PV1 = 0; // 上ローラー pwm5 (use_data[0])
+volatile int16_t PV2 = 0; // 上ローラー pwm7 (use_data[1])
+volatile int16_t PV3 = 0; // 下ローラー pwm6 (use_data[2])
+volatile int16_t PV4 = 0; // 下ローラー pwm8 (use_data[3])
+volatile int16_t PV5 = 0; // 未使用 (use_data[4])
+volatile int16_t PV6 = 0; // 未使用 (use_data[5])
 
+// 足回りの回転方向 (motor_simple_control が更新)
 int dir1 = 0;
 int dir2 = 0;
 int dir3 = 0;
 int dir4 = 0;
 
+/*
+ * 各モーターの PWM 値。タイマーごとに Period が違うので値の範囲も違う。
+ *   pwm1〜pwm4  足回り   TIM4 (Period 999) … 上限 maxpwm
+ *   pwm5〜pwm8  ローラー TIM1 (Period 254) … 上限 245
+ *   pwm9, pwm10 装填     TIM3 (Period 999) … 600 固定
+ *   pwm11, pwm12 予備    TIM3 (未使用)
+ * Period を超える値を入れると常に 100% デューティになるので注意。
+ */
 int pwm1 = 0;
 int pwm2 = 0;
 int pwm3 = 0;
@@ -131,17 +144,19 @@ int pwm11 = 0;
 int pwm12 = 0;
 
 
+// ローラーの motor_control 用。誤差を 1/10 するときの端数の繰り越し
 int rem5 = 0;
 int rem6 = 0;
 int rem7 = 0;
 int rem8 = 0;
 
-int maxpwm = 1000 * 0.8; 
+int maxpwm = 1000 * 0.9; // 足回りの PWM 上限 (TIM4 の Period 999 に対して 90%)
 
-int maxmv = 20;
+int maxmv = 20; // 未使用
 
-int reset_flag1 = 0;
-int reset_flag2 = 0;
+// 装填の原点復帰中フラグ。lock6/lock8 で立ち、原点の lock7/lock9 で下りる
+int reset_flag1 = 0; // 装填1
+int reset_flag2 = 0; // 装填2
 
 // 逆転リセットのリミットスイッチ。ノイズ除去して読む (limit_read)
 limit_sw sw_lock6 = LIMIT_SW_INIT(lock6_GPIO_Port, lock6_Pin); // 装填1 リセット開始
@@ -152,7 +167,8 @@ limit_sw sw_lock9 = LIMIT_SW_INIT(lock9_GPIO_Port, lock9_Pin); // 装填2 原点
 int roller_dir1 = 0; // 装填1(pwm9)の回転方向を保持する変数
 int roller_dir2 = 0; // 装填2(pwm10)の回転方向を保持する変数
 
-// ローラーは常に正転で方向転換しないため、dirの受け皿は共用の捨て変数でよい
+// ローラーは常に正転で方向転換しない (DIR は出力時に固定値を書く) ため、
+// motor_control の dir の受け皿は共用の捨て変数でよい
 int dummy = 0;
 
 // lidar
@@ -164,16 +180,14 @@ uint16_t distance4 = 0;
 uint8_t rx_dma_buf7[DMA_BUF_SIZE];
 uint16_t distance7 = 0;
 
-// 自動モード時の仮想スティック出力
-int auto_ly = 0; // 左右移動
-int auto_rx = 0; // 旋回
+// auto_mode() の PID が出す仮想スティック値
+int auto_ly = 0; // 前後 (壁との距離を保つ)。全自動モードで使用
+int auto_rx = 0; // 旋回 (壁と平行を保つ)。半自動・全自動モードで使用
 
-// timercount
-uint32_t time1 = 0;
-// uint32_t time3 = 0;
-uint32_t now = 0;
+uint32_t time1 = 0; // 足回りとローラーの 20ms 周期の基準時刻
+uint32_t now = 0;   // ループ先頭の HAL_GetTick()
 
-uint32_t last_can_rx = 0;
+uint32_t last_can_rx = 0; // 最後に CAN を受信した時刻 (safety() の CAN 断判定)
 
 // SBUS
 
@@ -184,7 +198,7 @@ uint8_t SBUS_Failsafe = 0;
 uint8_t SBUS_LostFrame = 0;
 uint32_t last_sbus_rx = 0; // 最後にSBUSフレームをデコードできた時刻
 
-// RX割り込みコールバック関数で使用
+// CAN 受信割り込みで書き込まれる最新の 8 バイト (ID 0x001)
 volatile uint8_t use_data[8];
 
 /* USER CODE END PV */
@@ -207,7 +221,6 @@ static void MX_TIM3_Init(void);
 static void MX_UART8_Init(void);
 /* USER CODE BEGIN PFP */
 
-// if(sbus_frame[0] != 0x0F)
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -223,7 +236,7 @@ int main(void)
 
   /* USER CODE BEGIN 1 */
 
-    setbuf(stdout, NULL);
+    setbuf(stdout, NULL); // printf をバッファせず、その場で USART3 へ送る
   /* USER CODE END 1 */
 
   /* MPU Configuration--------------------------------------------------------*/
@@ -260,9 +273,11 @@ int main(void)
   MX_TIM3_Init();
   MX_UART8_Init();
   /* USER CODE BEGIN 2 */
-    HAL_CAN_Start(&hcan1); // CANstart
+    HAL_CAN_Start(&hcan1);
     HAL_CAN_ActivateNotification(&hcan1,
-                                 CAN_IT_RX_FIFO0_MSG_PENDING); // 割り込み有効　
+                                 CAN_IT_RX_FIFO0_MSG_PENDING); // 受信割り込みを有効化
+
+    // 足回り (TIM4)、ローラー (TIM1)、装填 (TIM3) の PWM 出力を開始
 
     HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
     HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
@@ -279,13 +294,12 @@ int main(void)
     HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
     HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
 
-    SBUS_Init(); // ★【修正】SBUSの受信を開始
+    SBUS_Init(); // SBUS の受信を開始
 
-    HAL_Delay(100); // センサーの起動待ち
+    HAL_Delay(100); // Lidar の起動待ち
 
-    // 1. センサーに「Start Reading（測定開始）」のコマンドだけを送る
+    // Lidar 2 台 (UART4, UART7) に測定開始コマンドを送り、循環 DMA で受信を始める
     uint8_t startCmd[] = {0x5A, 0x0A, 0x02, 0x02, 0x00, 0xF1};
-    // センサー1 (UART4) に送信 & DMAスタート
     HAL_UART_Transmit(&huart4, startCmd, sizeof(startCmd), HAL_MAX_DELAY);
     HAL_UART_Transmit(&huart7, startCmd, sizeof(startCmd), HAL_MAX_DELAY);
     HAL_Delay(20);
@@ -298,6 +312,8 @@ int main(void)
   /* USER CODE BEGIN WHILE */
     while (1) {
         now = HAL_GetTick();
+
+        // CAN で受け取ったローラーのエンコーダ値
         PV1 = use_data[0];
         PV2 = use_data[1];
         PV3 = use_data[2];
@@ -305,9 +321,9 @@ int main(void)
         PV5 = use_data[4];
         PV6 = use_data[5];
 
-        sbus(); // SBUSの値の加工
+        sbus(); // スイッチとスティックを読み、手動用の m1〜m4 を計算
 
-        lidar(); // lidarの値の読み取り
+        lidar(); // Lidar の距離を更新
 
         // lock6/lock8 は逆転リセットの開始、lock7/lock9 は原点リミット。
         // 原点リミットは「リセットの終了」だけを担当させる。ここで pwm を直接 0 に
@@ -325,7 +341,7 @@ int main(void)
             reset_flag2 = 0;
         }
 
-        // 足回り
+        // 足回りとローラー (20ms 周期。auto_mode() の dt もこの周期が前提)
         if (now - time1 >= 20) {
             // Lidarが死んでいると auto_mode は「壁まで遠すぎる」と誤認して全速で走り続ける。
             // 測定値が途絶えている間は自動系を止め、手動モードとして扱う。
@@ -341,6 +357,8 @@ int main(void)
                 motor_simple_control(m3,80, maxpwm, &pwm3, &dir3);
                 motor_simple_control(m4,80, maxpwm, &pwm4, &dir4);
             } else if (Rmayu1 == 0) {
+                // 半自動モード: 前後・左右は手で操作し、旋回だけ PID で壁と平行を保つ。
+                // 目標距離に現在距離を渡して距離の誤差を 0 にし、auto_ly を効かせない。
                 auto_mode(distance4 - LIDAR_OFFSET4, distance7 - LIDAR_OFFSET7, 0,
                           (distance4 + distance7 - (LIDAR_OFFSET4 + LIDAR_OFFSET7)) / 2);
                 // sbus() の m1〜m4 と同じ式で、rx だけ PID の auto_rx に差し替える。
@@ -356,28 +374,30 @@ int main(void)
                 motor_simple_control(gauto_m4,80, maxpwm, &pwm4, &dir4);
 
             } else if (Rmayu1 == 1) {
-                // 自動モード
+                // 全自動モード: 壁からの距離と平行を PID で保ち、左右だけ手で操作する
                 auto_mode(distance4 - LIDAR_OFFSET4, distance7 - LIDAR_OFFSET7, 0, AUTO_TARGET_DIST_MM);
 
-                // 自動計算された ly, rx を使って m1〜m4 を計算（あなたの式を再利用！）
+                // sbus() の m1〜m4 の式で、ly を -auto_ly、rx を auto_rx に差し替えたもの。
+                // auto_ly は ly と符号が逆 (PID 出力の符号は実機合わせ)。
                 int auto_m1 = auto_ly + lx + auto_rx;
                 int auto_m2 = auto_ly - lx + auto_rx;
                 int auto_m3 = -auto_ly - lx + auto_rx;
                 int auto_m4 = -auto_ly + lx + auto_rx;
 
-                // 計算結果をモーターに出力
                 motor_simple_control(auto_m1, 80, maxpwm, &pwm1, &dir1);
                 motor_simple_control(auto_m2, 80, maxpwm, &pwm2, &dir2);
                 motor_simple_control(auto_m3, 80, maxpwm, &pwm3, &dir3);
                 motor_simple_control(auto_m4, 80, maxpwm, &pwm4, &dir4);
             }
 
+        // 足回りの pwm1〜pwm4 が決まった後に呼ぶ (safety() の頭打ちがそれを見るため)
         roller();
 
             time1 = now;
         }
 
-        // 電磁弁
+        // 電磁弁と装填 (毎周回)
+        //   ローラー停止中は電磁弁で撃ち、ローラー回転中は装填モーターで球を送る
         switch (Rtuno2) {
         case 0: // 打たない
             HAL_GPIO_WritePin(lock1_GPIO_Port, lock1_Pin, 0);
@@ -418,6 +438,7 @@ int main(void)
 
         
 
+        // 原点復帰中は上の指令より優先して装填モーターを逆転させる
         if (reset_flag1 == 1) {
             pwm9 = 600;
             roller_dir1 = 0; // 装填1 逆転リセット
@@ -427,7 +448,9 @@ int main(void)
             roller_dir2 = 0; // 装填2 逆転リセット
         }
 
-         safety(); // 安全機能の呼び出し
+        // 必ず PWM を出力する直前に呼ぶこと。これより後で pwm を書き換えると
+        // 異常時の停止やローラーの頭打ちが効かなくなる。
+         safety();
 
         // 基板 (2026_B_main) は PWMn と DIRn が同じドライバへ行く配線なので、
         // DIR はソフトの mN 番号ではなく「その PWM が出ている基板ch の DIR」を書く。
@@ -441,7 +464,8 @@ int main(void)
         __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, pwm4); // m4 = 基板ch2 (PWM2=PD13)
         HAL_GPIO_WritePin(d2_GPIO_Port, d2_Pin, dir4);             // DIR2 = PB2
 
-        // ローラーは常に一方向なので DIR は固定値。上下で向かい合うので対になる2個は逆の値にする。
+        // ローラーは常に一方向なので DIR は固定値。
+        // 対になる 2 個は向かい合っているので、逆の値にして互いに逆回転させる。
         __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, pwm5); // m5 上ローラー = 基板ch7 (PWM7=PE11)
         HAL_GPIO_WritePin(d7_GPIO_Port, d7_Pin, 0);                // DIR7 = PF12
         __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pwm6); // m6 下ローラー = 基板ch8 (PWM8=PE9)
@@ -456,6 +480,7 @@ int main(void)
         HAL_GPIO_WritePin(d10_GPIO_Port, d10_Pin, roller_dir1);     // DIR10 = PA11
         __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pwm10); // m10 装填2 = 基板ch9 (PWM9=PC6)
         HAL_GPIO_WritePin(d9_GPIO_Port, d9_Pin, roller_dir2);       // DIR9 = PA12
+        // 予備 (未使用)
         // __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, pwm11); // m11 = 基板ch11 (PWM11=PC8)
         // HAL_GPIO_WritePin(d11_GPIO_Port, d11_Pin, roller_dir); // DIR11 = PB12
         // __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, pwm12); // m12 = 基板ch12 (PWM12=PC9)
@@ -551,11 +576,13 @@ static void MX_CAN1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN CAN1_Init 2 */
+    // 16bit の ID リストモードなので、Mask 側も含めた 4 つがそのまま受信する ID になる。
+    // 受信するのは 0x001〜0x004 で、実際に使っているのは 0x001 (ローラーのエンコーダ値) だけ。
     CAN_FilterTypeDef filter;
-    filter.FilterIdHigh = 0x001 << 5;               // フィルターID1
-    filter.FilterIdLow = 0x002 << 5;                // フィルターID2
-    filter.FilterMaskIdHigh = 0x003 << 5;           // フィルターID3
-    filter.FilterMaskIdLow = 0x004 << 5;            // フィルターID4
+    filter.FilterIdHigh = 0x001 << 5;               // 受信ID 1
+    filter.FilterIdLow = 0x002 << 5;                // 受信ID 2
+    filter.FilterMaskIdHigh = 0x003 << 5;           // 受信ID 3
+    filter.FilterMaskIdLow = 0x004 << 5;            // 受信ID 4
     filter.FilterScale = CAN_FILTERSCALE_16BIT;     // 16モード
     filter.FilterFIFOAssignment = CAN_FILTER_FIFO0; // FIFO0へ格納
     filter.FilterBank = 0;

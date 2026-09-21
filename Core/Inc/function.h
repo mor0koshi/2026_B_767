@@ -6,7 +6,7 @@ extern "C" {
 #endif
 
 #include "main.h"
-#include "sbus_handler.h" /* SBUS_CH, SBUS_LostFrame を safety() で使用するため */
+#include "sbus_handler.h" /* safety() で SBUS の受信状態 (SBUS_CH, Failsafe, LostFrame, last_sbus_rx) を見るため */
 #include <stdint.h>
 
 /* ペリフェラルハンドル (main.c で定義) */
@@ -17,6 +17,7 @@ extern TIM_HandleTypeDef htim3;
 extern TIM_HandleTypeDef htim4;
 
 /* 共有変数 (main.c で定義) */
+/* ローラーのエンコーダ値 (CAN の use_data[0..3]) */
 extern volatile int16_t PV1;
 extern volatile int16_t PV2;
 extern volatile int16_t PV3;
@@ -34,6 +35,7 @@ extern int pwm9;
 extern int pwm10;
 extern int pwm11;
 extern int pwm12;
+/* rem1〜rem4, rem9〜rem12 は main.c に実体が無い (未使用) */
 extern int rem1;
 extern int rem2;
 extern int rem3;
@@ -48,7 +50,7 @@ extern int rem11;
 extern int rem12;
 
 
-extern int timer_flag;
+extern int timer_flag; /* main.c に実体が無い (未使用) */
 extern int reset_flag1;
 extern int reset_flag2;
 
@@ -59,7 +61,6 @@ extern int dummy;
 extern int auto_ly;
 extern int auto_rx;
 
-//extern uint32_t time3 = 0;
 extern uint32_t now;
 extern uint32_t last_can_rx;
 
