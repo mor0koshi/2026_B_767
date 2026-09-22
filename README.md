@@ -15,19 +15,34 @@ STM32F767ZI をベースにした、4輪オムニ駆動ロボットの制御フ�
 
 ## 制御ループ
 
-メインループは次の順番で処理します。足回りとローラーだけ20ms周期で、それ以外は毎周回実行します。
+メインループ（`main.c`）は次の関数を順番に呼ぶだけです。足回りとローラーだけ20ms周期で、それ以外は毎周回実行します。
 
-1. CAN 受信データ `use_data[0..3]` を `PV1`〜`PV4` にコピー
-2. `sbus()` でスイッチとスティックを読み、手動用の `m1`〜`m4` を計算
-3. `lidar()` で Lidar のフレームを解析
-4. リミットスイッチ（lock6〜9）を読み、装填の原点復帰フラグを更新
-5. **20ms ごと**: 足回り（モード別）→ `roller()`
-6. 電磁弁と装填の処理（`Rtuno2`）
-7. 原点復帰中なら装填モーターを逆転させる
-8. `safety()` で異常時の停止とローラーの頭打ちを適用
-9. PWM と DIR を出力
+```c
+PV1〜PV4 = use_data[0..3];  // CAN で受け取ったローラーのエンコーダ値
+sbus();                     // スイッチとスティックを読む
+lidar();                    // Lidar の距離を更新
+if (20ms 経過) {
+    asimawari();            // 足回り
+    roller();               // ローラー
+}
+loader();                   // 電磁弁と装填（原点復帰を含む）
+safety();                   // 異常時の停止、走行中のローラー制限、LED
+motor_outputs();            // PWM と DIR を出力
+```
 
 `safety()` は PWM を出力する直前に呼ぶので、どのモードで計算された値にも必ず安全処理がかかります。
+
+## ファイル構成（`Core/Src` / `Core/Inc`）
+
+| ファイル | 中身 |
+|---|---|
+| `main.c` | 共有変数の定義、初期化、メインループ（CubeMX 生成） |
+| `function.c` / `.h` | 足回り（`asimawari`）、ローラー（`roller`）、装填（`loader`）、Lidar PID（`auto_mode`）、リミットスイッチ、PWM/DIR 出力（`motor_outputs`） |
+| `motor_control.c` / `.h` | モーター1個分の制御（`motor_control`、`motor_simple_control`） |
+| `safety.c` / `.h` | 安全機能（`safety`）とステータス LED |
+| `can_handler.c` / `.h` | CAN の送受信 |
+| `sbus_handler.c` / `.h` | SBUS の受信・デコードとスイッチ/スティックの変換 |
+| `lidar_sensor.c` / `.h` | Lidar のフレーム解析とタイムアウト判定 |
 
 ## SBUS チャンネル割り当て
 
@@ -62,17 +77,22 @@ STM32F767ZI をベースにした、4輪オムニ駆動ロボットの制御フ�
 
 ### オムニの混合式
 
-手動モードの式は次の通りです（`sbus_handler.c`）。
+`asimawari()` はモードごとに「前後・左右・旋回」の3つを決め、`omni_mix()` で4輪の指令値に変換します。混合式は `omni_mix()` の1箇所だけなので、式を変えるときもここだけ直せば全モードに反映されます。
 
 ```c
-m1 = -ly + lx - rx;  // 左前
-m2 = -ly - lx - rx;  // 右前
-m3 =  ly - lx - rx;  // 左後
-m4 =  ly + lx - rx;  // 右後
-// そのあと全体を ×0.9（1軸を倒しきると maxpwm の 900 ちょうど）
+taiya[0] = -forward + strafe + turn;  // 左前 (pwm1)
+taiya[1] = -forward - strafe + turn;  // 右前 (pwm2)
+taiya[2] =  forward - strafe + turn;  // 左後 (pwm3)
+taiya[3] =  forward + strafe + turn;  // 右後 (pwm4)
 ```
 
-半自動は `rx` を `+auto_rx` に置き換えた式、全自動はさらに `ly` を `-auto_ly` に置き換えた式です（`main.c`）。**混合式を変えるときは、この3箇所を必ず揃えてください。** ずれると、モードを切り替えたときにモーターが逆回転します。
+| モード | forward | strafe | turn |
+|---|---|---|---|
+| 手動 | `ly` | `lx` | `-rx`（そのあと全体を ×0.9。1軸を倒しきると `maxpwm` の 900 ちょうど） |
+| 半自動 | `ly` | `lx` | `auto_rx` |
+| 全自動 | `-auto_ly` | `lx` | `auto_rx` |
+
+`auto_ly` が `ly` と逆符号なのは、PID 出力の符号を実機に合わせているためです。
 
 足回りは `motor_simple_control` で、20ms ごとに最大 80 ずつ目標値に近づけます。上限は `maxpwm`（900、デューティ90%）です。
 
@@ -85,7 +105,7 @@ m4 =  ly + lx - rx;  // 右後
 | `1` | 上ローラー（pwm5 / pwm7） | `Ltuno1` で選択: `1`→200、`0`→150、`-1`→100 |
 | `0` | 下ローラー（pwm6 / pwm8） | 245（`ROLLER_SPEED`） |
 
-ローラーは `motor_control` で速度を閉ループ制御します。フィードバックは CAN で受け取る `PV1`〜`PV4` で、上ローラーが PV1 / PV2、下ローラーが PV3 / PV4 です。PWM の上限は 245（TIM1 の Period は 254）です。
+ローラーは `motor_control` で速度を閉ループ制御します。フィードバックは CAN で受け取る `PV1`〜`PV4` で、上ローラーが PV1 / PV2、下ローラーが PV3 / PV4 です。PWM の上限は 250（TIM1 の Period は 254）です。目標速度（最大245）に届かないときに、少し余裕を持って PWM を上げられるようにしています。
 
 ## 発射と装填（`Rtuno2`）
 
@@ -163,7 +183,7 @@ m4 =  ly + lx - rx;  // 右後
 | 系統 | タイマー | Period | 使っている上限 |
 |---|---|---|---|
 | 足回り | TIM4 | 999 | 900（`maxpwm`） |
-| ローラー | TIM1 | 254 | 245 |
+| ローラー | TIM1 | 254 | 250 |
 | 装填 | TIM3 | 999 | 600 |
 
 **Period を超える値を入れると、常に 100% デューティになります。** 値やタイマー設定を変えるときは、この表と合っているか確認してください。
@@ -172,15 +192,19 @@ m4 =  ly + lx - rx;  // 右後
 
 | 関数 | ファイル | 説明 |
 |---|---|---|
-| `motor_control(SV, PV, maxMV, down_pwm, max_pwm, *pwm, *dir, *rem)` | function.c | エンコーダ付きの速度制御（ローラー用）。誤差の1/10を毎周期 PWM に足し込む積分制御で、1周期の変化量は `maxMV` までです。`rem` は整数除算の端数の繰り越しで、誤差が小さい領域の不感帯をなくします。方向転換と停止のときは `down_pwm` ずつ PWM を落とします。 |
-| `motor_simple_control(SV, step, max_pwm, *pwm, *dir)` | function.c | エンコーダなしのランプ制御（足回り用）。`SV` の符号が回転方向です。PWM を `step` ずつ目標に近づけ、方向転換のときは一度 0 まで落としてから向きを変えます。 |
+| `motor_control(SV, PV, maxMV, down_pwm, max_pwm, *pwm, *dir, *rem)` | motor_control.c | エンコーダ付きの速度制御（ローラー用）。誤差の1/10を毎周期 PWM に足し込む積分制御で、1周期の変化量は `maxMV` までです。`rem` は整数除算の端数の繰り越しで、誤差が小さい領域の不感帯をなくします。方向転換と停止のときは `down_pwm` ずつ PWM を落とします。 |
+| `motor_simple_control(SV, step, max_pwm, *pwm, *dir)` | motor_control.c | エンコーダなしのランプ制御（足回り用）。`SV` の符号が回転方向です。PWM を `step` ずつ目標に近づけ、方向転換のときは一度 0 まで落としてから向きを変えます。 |
+| `asimawari()` | function.c | 走行モードに応じて前後・左右・旋回を決め、足回り4輪を動かします。 |
+| `omni_mix(forward, strafe, turn, taiya)` | function.c | オムニの混合式。全モード共通です。 |
 | `roller()` | function.c | `Lmayu2` / `Lmayu1` / `Ltuno1` に応じてローラー4個の目標速度を決めます。 |
+| `loader()` | function.c | 電磁弁と装填モーター。リミットスイッチによる原点復帰もここで行います。 |
+| `motor_outputs()` | function.c | PWM と DIR をまとめて出力します。 |
 | `auto_mode(d1, d2, reset, target)` | function.c | 2つの Lidar 距離から、距離を保つ PID（`auto_ly`）と平行を保つ PID（`auto_rx`）を計算します。`reset=1` で積分値をリセットします。 |
-| `safety()` | function.c | 異常時の全停止、走行中のローラー制限、LED 表示。 |
+| `safety()` | safety.c | 異常時の全停止、走行中のローラー制限、LED 表示。 |
 | `limit_read(sw)` | function.c | リミットスイッチを読みます。20ms 同じ値が続いたときだけ確定値を更新します。 |
-| `HAL_CAN_RxFifo0MsgPendingCallback` | function.c | CAN 受信割り込み。ID `0x001`、DLC 8以上のフレームを `use_data[]` に格納します。 |
-| `CAN_TX(id)` | function.c | CAN 送信。現在はどこからも呼ばれていません。 |
-| `sbus()` | sbus_handler.c | スイッチとスティックを読み、手動用の `m1`〜`m4` を計算します。 |
+| `HAL_CAN_RxFifo0MsgPendingCallback` | can_handler.c | CAN 受信割り込み。ID `0x001`、DLC 8以上のフレームを `use_data[]` に格納します。 |
+| `CAN_TX(id)` | can_handler.c | CAN 送信。現在はどこからも呼ばれていません。 |
+| `sbus()` | sbus_handler.c | スイッチとスティックを読みます。 |
 | `SBUS_Process()` | sbus_handler.c | SBUS フレームを16チャンネルにデコードし、受信時刻を記録します。 |
 | `lidar()` | lidar_sensor.c | DMA リングバッファから TSD20 の4バイトフレーム（`5C` / 距離下位 / 距離上位 / チェックサム）を取り出します。チェックサムが合わなければ1バイト進めて同期し直します。 |
 | `lidar_timeout()` | lidar_sensor.c | どちらかの Lidar の有効な測定値が100ms以上途絶えていれば 1 を返します。 |
@@ -197,6 +221,7 @@ m4 =  ly + lx - rx;  // 右後
 | `LIDAR_TIMEOUT_MS` | lidar_sensor.h | 100 | Lidar 途絶と判定するまでの時間 |
 | `SBUS_TIMEOUT_MS` | sbus_handler.h | 100 | SBUS 断と判定するまでの時間 |
 | `LIMIT_DEBOUNCE_MS` | function.c | 20 | リミットスイッチのノイズ除去時間 |
+| `ROLLER_PWM_WHILE_DRIVING` | safety.c | 100 | 走行中のローラーの PWM 上限 |
 | PID ゲイン | function.c `auto_mode()` | 距離 1.3 / 0.008 / 0.05、角度 0.6 / 0.01 / 0.2 | Kp / Ki / Kd |
 
 `auto_mode()` の PID 出力の符号は、実機に合わせて調整する前提です。
@@ -217,3 +242,5 @@ cmake --build build/Debug
 ```
 
 出力は `build/Debug/2026_B_767.elf` です。
+
+自作の `.c` ファイルを増やしたときは、`CMakeLists.txt` の `target_sources`（`# Add user sources here` の下）に追加してください。追加しないと、リンク時に関数が見つからないエラーになります。

@@ -113,7 +113,7 @@ int process_stick(int ch_value) {
     return mapped;
 }
 
-// スイッチとスティックを読み、手動モードのオムニ混合値 m1〜m4 を計算する
+// スイッチとスティックを読む。足回りへの混合は asimawari() (function.c) で行う
 void sbus(void){
     Lmayu1 = get_switch_state2(SBUS_CH[4]);
     Lmayu2 = get_switch_state2(SBUS_CH[5]);
@@ -126,16 +126,4 @@ void sbus(void){
     ly = process_stick(SBUS_CH[1]);
     ry = process_stick(SBUS_CH[2]);
     lx = process_stick(SBUS_CH[3]);
-
-    // 式を変えるときは main.c の半自動 (gauto_m*) と全自動 (auto_m*) も必ず揃えること
-    m1 =  -ly + lx - rx; // 左前 (Front Left)
-    m2 = -ly - lx - rx; // 右前 (Front Right)
-    m3 = ly - lx - rx; // 左後 (Rear Left)
-    m4 =  ly + lx - rx; // 右後 (Rear Right)
-
-    // 0.9 倍して、1 軸を倒しきったときにちょうど maxpwm (900) になるようにする
-    m1 = (m1 * 9) / 10;
-    m2 = (m2 * 9) / 10;
-    m3 = (m3 * 9) / 10;
-    m4 = (m4 * 9) / 10;
-    }
+}

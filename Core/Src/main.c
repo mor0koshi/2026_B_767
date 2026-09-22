@@ -24,6 +24,8 @@
 /* USER CODE BEGIN Includes */
 #include "sbus.h"
 #include "function.h"
+#include "can_handler.h"
+#include "safety.h"
 #include "sbus_handler.h"
 #include "lidar_sensor.h"
 #include <math.h>
@@ -102,12 +104,6 @@ int Rmayu2; // CH7 電磁弁の選択    0=lock1 / 1=lock2
 int Ltuno1; // CH8 上ローラー速度  1=200 / 0=150 / -1=100
 int Rtuno2; // CH9 発射            1=打つ / 0=打たない
 
-// 手動モードのオムニ混合値 (sbus() で計算)
-volatile int m1; // 左前
-volatile int m2; // 右前
-volatile int m3; // 左後
-volatile int m4; // 右後
-
 // CAN (ID 0x001) で受け取るローラーのエンコーダ値。0〜255
 volatile int16_t PV1 = 0; // 上ローラー pwm5 (use_data[0])
 volatile int16_t PV2 = 0; // 上ローラー pwm7 (use_data[1])
@@ -125,7 +121,7 @@ int dir4 = 0;
 /*
  * 各モーターの PWM 値。タイマーごとに Period が違うので値の範囲も違う。
  *   pwm1〜pwm4  足回り   TIM4 (Period 999) … 上限 maxpwm
- *   pwm5〜pwm8  ローラー TIM1 (Period 254) … 上限 245
+ *   pwm5〜pwm8  ローラー TIM1 (Period 254) … 上限 250
  *   pwm9, pwm10 装填     TIM3 (Period 999) … 600 固定
  *   pwm11, pwm12 予備    TIM3 (未使用)
  * Period を超える値を入れると常に 100% デューティになるので注意。
@@ -157,12 +153,6 @@ int maxmv = 20; // 未使用
 // 装填の原点復帰中フラグ。lock6/lock8 で立ち、原点の lock7/lock9 で下りる
 int reset_flag1 = 0; // 装填1
 int reset_flag2 = 0; // 装填2
-
-// 逆転リセットのリミットスイッチ。ノイズ除去して読む (limit_read)
-limit_sw sw_lock6 = LIMIT_SW_INIT(lock6_GPIO_Port, lock6_Pin); // 装填1 リセット開始
-limit_sw sw_lock7 = LIMIT_SW_INIT(lock7_GPIO_Port, lock7_Pin); // 装填1 原点
-limit_sw sw_lock8 = LIMIT_SW_INIT(lock8_GPIO_Port, lock8_Pin); // 装填2 リセット開始
-limit_sw sw_lock9 = LIMIT_SW_INIT(lock9_GPIO_Port, lock9_Pin); // 装填2 原点
 
 int roller_dir1 = 0; // 装填1(pwm9)の回転方向を保持する変数
 int roller_dir2 = 0; // 装填2(pwm10)の回転方向を保持する変数
@@ -321,170 +311,23 @@ int main(void)
         PV5 = use_data[4];
         PV6 = use_data[5];
 
-        sbus(); // スイッチとスティックを読み、手動用の m1〜m4 を計算
-
+        sbus();  // スイッチとスティックを読む
         lidar(); // Lidar の距離を更新
 
-        // lock6/lock8 は逆転リセットの開始、lock7/lock9 は原点リミット。
-        // 原点リミットは「リセットの終了」だけを担当させる。ここで pwm を直接 0 に
-        // すると、原点で静止している間は通常の正転指令まで毎周回打ち消されてしまう。
-        if (limit_read(&sw_lock6) == 0) {
-            reset_flag1 = 1;
-        }
-        if (limit_read(&sw_lock7) == 0) {
-            reset_flag1 = 0;
-        }
-        if (limit_read(&sw_lock8) == 0) {
-            reset_flag2 = 1;
-        }
-        if (limit_read(&sw_lock9) == 0) {
-            reset_flag2 = 0;
-        }
-
-        // 足回りとローラー (20ms 周期。auto_mode() の dt もこの周期が前提)
+        // 足回りとローラーは 20ms 周期 (auto_mode() の dt もこの周期が前提)
         if (now - time1 >= 20) {
-            // Lidarが死んでいると auto_mode は「壁まで遠すぎる」と誤認して全速で走り続ける。
-            // 測定値が途絶えている間は自動系を止め、手動モードとして扱う。
-            int lidar_ng = lidar_timeout();
-
-            if (Rmayu1 == -1 || lidar_ng) {
-                // 手動モード（Lidar異常時もここに）
-                // ★裏でPIDの記憶をリセットしておく。
-                //   引数は全自動モードと必ず同じにすること（違うと切替時にD項が跳ねる）
-                auto_mode(distance4 - LIDAR_OFFSET4, distance7 - LIDAR_OFFSET7, 1, AUTO_TARGET_DIST_MM);
-                motor_simple_control(m1,80, maxpwm, &pwm1, &dir1);
-                motor_simple_control(m2,80, maxpwm, &pwm2, &dir2);
-                motor_simple_control(m3,80, maxpwm, &pwm3, &dir3);
-                motor_simple_control(m4,80, maxpwm, &pwm4, &dir4);
-            } else if (Rmayu1 == 0) {
-                // 半自動モード: 前後・左右は手で操作し、旋回だけ PID で壁と平行を保つ。
-                // 目標距離に現在距離を渡して距離の誤差を 0 にし、auto_ly を効かせない。
-                auto_mode(distance4 - LIDAR_OFFSET4, distance7 - LIDAR_OFFSET7, 0,
-                          (distance4 + distance7 - (LIDAR_OFFSET4 + LIDAR_OFFSET7)) / 2);
-                // sbus() の m1〜m4 と同じ式で、rx だけ PID の auto_rx に差し替える。
-                // 式を変えるときは sbus_handler.c と必ず揃えること。
-                int gauto_m1 = -ly + lx + auto_rx;
-                int gauto_m2 = -ly - lx + auto_rx;
-                int gauto_m3 = ly - lx + auto_rx;
-                int gauto_m4 = ly + lx + auto_rx;
-
-                motor_simple_control(gauto_m1,80, maxpwm, &pwm1, &dir1);
-                motor_simple_control(gauto_m2,80, maxpwm, &pwm2, &dir2);
-                motor_simple_control(gauto_m3,80, maxpwm, &pwm3, &dir3);
-                motor_simple_control(gauto_m4,80, maxpwm, &pwm4, &dir4);
-
-            } else if (Rmayu1 == 1) {
-                // 全自動モード: 壁からの距離と平行を PID で保ち、左右だけ手で操作する
-                auto_mode(distance4 - LIDAR_OFFSET4, distance7 - LIDAR_OFFSET7, 0, AUTO_TARGET_DIST_MM);
-
-                // sbus() の m1〜m4 の式で、ly を -auto_ly、rx を auto_rx に差し替えたもの。
-                // auto_ly は ly と符号が逆 (PID 出力の符号は実機合わせ)。
-                int auto_m1 = auto_ly + lx + auto_rx;
-                int auto_m2 = auto_ly - lx + auto_rx;
-                int auto_m3 = -auto_ly - lx + auto_rx;
-                int auto_m4 = -auto_ly + lx + auto_rx;
-
-                motor_simple_control(auto_m1, 80, maxpwm, &pwm1, &dir1);
-                motor_simple_control(auto_m2, 80, maxpwm, &pwm2, &dir2);
-                motor_simple_control(auto_m3, 80, maxpwm, &pwm3, &dir3);
-                motor_simple_control(auto_m4, 80, maxpwm, &pwm4, &dir4);
-            }
-
-        // 足回りの pwm1〜pwm4 が決まった後に呼ぶ (safety() の頭打ちがそれを見るため)
-        roller();
-
+            asimawari();
+            roller();
             time1 = now;
         }
 
-        // 電磁弁と装填 (毎周回)
-        //   ローラー停止中は電磁弁で撃ち、ローラー回転中は装填モーターで球を送る
-        switch (Rtuno2) {
-        case 0: // 打たない
-            HAL_GPIO_WritePin(lock1_GPIO_Port, lock1_Pin, 0);
-            HAL_GPIO_WritePin(lock2_GPIO_Port, lock2_Pin, 0);
-            pwm9 = 0;
-            pwm10 = 0;
-
-            break;
-        case 1:                // 打つ
-            if (Lmayu2 == 0) { // ローラーが止まっている
-                switch (Rmayu2) {
-                case 0:
-                    HAL_GPIO_WritePin(lock1_GPIO_Port, lock1_Pin, 1);
-                    HAL_GPIO_WritePin(lock2_GPIO_Port, lock2_Pin, 0);
-                    break;
-                case 1:
-                    HAL_GPIO_WritePin(lock1_GPIO_Port, lock1_Pin, 0);
-                    HAL_GPIO_WritePin(lock2_GPIO_Port, lock2_Pin, 1);
-                    break;
-                }
-            } else if (Lmayu2 == 1) { // ローラーが回っている
-                HAL_GPIO_WritePin(lock1_GPIO_Port, lock1_Pin, 0);
-                HAL_GPIO_WritePin(lock2_GPIO_Port, lock2_Pin, 0);
-                if (Lmayu1 == 1) { // 上ローラー回転中 → 装填2で送る
-                    pwm9 = 0;
-                    pwm10 = 600;
-                    roller_dir2 = 1; // 装填2 正転
-
-                } else if (Lmayu1 == 0) { // 下ローラー回転中 → 装填1で送る
-                    pwm9 = 600;
-                    pwm10 = 0;
-                    roller_dir1 = 1; // 装填1 正転
-                }
-            }
-
-            break;
-        }
-
-        
-
-        // 原点復帰中は上の指令より優先して装填モーターを逆転させる
-        if (reset_flag1 == 1) {
-            pwm9 = 600;
-            roller_dir1 = 0; // 装填1 逆転リセット
-        }
-        if (reset_flag2 == 1) {
-            pwm10 = 600;
-            roller_dir2 = 0; // 装填2 逆転リセット
-        }
+        loader(); // 電磁弁と装填 (毎周回)
 
         // 必ず PWM を出力する直前に呼ぶこと。これより後で pwm を書き換えると
         // 異常時の停止やローラーの頭打ちが効かなくなる。
-         safety();
+        safety();
 
-        // 基板 (2026_B_main) は PWMn と DIRn が同じドライバへ行く配線なので、
-        // DIR はソフトの mN 番号ではなく「その PWM が出ている基板ch の DIR」を書く。
-        // 例: m1 の PWM は PD15 = 基板の PWM3 なので、DIR は d3 (PE10)。
-        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_4, pwm1); // m1 = 基板ch3 (PWM3=PD15)
-        HAL_GPIO_WritePin(d3_GPIO_Port, d3_Pin, dir1);             // DIR3 = PE10
-        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, pwm2); // m2 = 基板ch4 (PWM4=PD14)
-        HAL_GPIO_WritePin(d4_GPIO_Port, d4_Pin, dir2);             // DIR4 = PD11
-        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, pwm3); // m3 = 基板ch1 (PWM1=PD12)
-        HAL_GPIO_WritePin(d1_GPIO_Port, d1_Pin, dir3);             // DIR1 = PB1
-        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, pwm4); // m4 = 基板ch2 (PWM2=PD13)
-        HAL_GPIO_WritePin(d2_GPIO_Port, d2_Pin, dir4);             // DIR2 = PB2
-
-        // ローラーは常に一方向なので DIR は固定値。
-        // 対になる 2 個は向かい合っているので、逆の値にして互いに逆回転させる。
-        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, pwm5); // m5 上ローラー = 基板ch7 (PWM7=PE11)
-        HAL_GPIO_WritePin(d7_GPIO_Port, d7_Pin, 0);                // DIR7 = PF12
-        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pwm6); // m6 下ローラー = 基板ch8 (PWM8=PE9)
-        HAL_GPIO_WritePin(d8_GPIO_Port, d8_Pin, 0);                // DIR8 = PF13
-        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, pwm7); // m7 上ローラー = 基板ch5 (PWM5=PE13)
-        HAL_GPIO_WritePin(d5_GPIO_Port, d5_Pin, 1);                // DIR5 = PF3
-        __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_4, pwm8); // m8 下ローラー = 基板ch6 (PWM6=PE14)
-        HAL_GPIO_WritePin(d6_GPIO_Port, d6_Pin, 1);                // DIR6 = PF14
-
-        // 装填は正転/逆転リセットがあるので DIR は roller_dir を出す。
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, pwm9);  // m9 装填1 = 基板ch10 (PWM10=PC7)
-        HAL_GPIO_WritePin(d10_GPIO_Port, d10_Pin, roller_dir1);     // DIR10 = PA11
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pwm10); // m10 装填2 = 基板ch9 (PWM9=PC6)
-        HAL_GPIO_WritePin(d9_GPIO_Port, d9_Pin, roller_dir2);       // DIR9 = PA12
-        // 予備 (未使用)
-        // __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, pwm11); // m11 = 基板ch11 (PWM11=PC8)
-        // HAL_GPIO_WritePin(d11_GPIO_Port, d11_Pin, roller_dir); // DIR11 = PB12
-        // __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, pwm12); // m12 = 基板ch12 (PWM12=PC9)
-        // HAL_GPIO_WritePin(d12_GPIO_Port, d12_Pin, 1);         // DIR12 = PB11
+        motor_outputs();
 
     /* USER CODE END WHILE */
 

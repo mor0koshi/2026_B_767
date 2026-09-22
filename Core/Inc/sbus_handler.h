@@ -40,11 +40,6 @@ extern int Ltuno1;
 extern int Rtuno2;
 
 
-extern volatile int m1;
-extern volatile int m2;
-extern volatile int m3;
-extern volatile int m4;
-
 /* 関数プロトタイプ */
 long map(long x, long in_min, long in_max, long out_min, long out_max);
 

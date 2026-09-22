@@ -6,11 +6,10 @@ extern "C" {
 #endif
 
 #include "main.h"
-#include "sbus_handler.h" /* safety() で SBUS の受信状態 (SBUS_CH, Failsafe, LostFrame, last_sbus_rx) を見るため */
+#include "sbus_handler.h" /* スイッチとスティックの値 (Lmayu1, ly など) を使うため */
 #include <stdint.h>
 
 /* ペリフェラルハンドル (main.c で定義) */
-extern CAN_HandleTypeDef hcan1;
 extern UART_HandleTypeDef huart3;
 extern TIM_HandleTypeDef htim1;
 extern TIM_HandleTypeDef htim3;
@@ -54,6 +53,12 @@ extern int timer_flag; /* main.c に実体が無い (未使用) */
 extern int reset_flag1;
 extern int reset_flag2;
 
+extern int dir1;
+extern int dir2;
+extern int dir3;
+extern int dir4;
+extern int maxpwm;
+
 extern int roller_dir1;
 extern int roller_dir2;
 extern int dummy;
@@ -62,21 +67,21 @@ extern int auto_ly;
 extern int auto_rx;
 
 extern uint32_t now;
-extern uint32_t last_can_rx;
-
-extern volatile uint8_t use_data[8];
 
 /* 関数プロトタイプ */
 int _write(int file, char *ptr, int len);
 
-void CAN_TX(uint32_t recipient);
+/*
+ * メインループから呼ぶ順番
+ *   asimawari() → roller() → loader() → safety() (safety.h) → motor_outputs()
+ * CAN は can_handler.h、モーター 1 個分の制御は motor_control.h
+ */
+void asimawari(void);     /* 足回り (20ms 周期) */
+void roller(void);        /* ローラー (20ms 周期) */
+void loader(void);        /* 電磁弁と装填 (毎周回) */
+void motor_outputs(void); /* PWM と DIR の出力。safety() の後に呼ぶ */
 
-void motor_control(int SV, int PV, int maxMV, int down_pwm, int max_pwm, int *pwmm, int *dirr,int *remm);
-void motor_simple_control(int SV, int step, int max_pwm, int *pwmm, int *dirr);
-
-void roller(void);
 void auto_mode(int distance1, int distance2, int reset_flag, int target_dist);
-void safety(void);
 /*
  * リミットスイッチ入力のノイズ除去用。
  * モーターのPWMノイズで一瞬 Low を読んだだけでフラグが立つのを防ぐ。

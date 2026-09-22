@@ -46,6 +46,9 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     Core/Src/function.c
+    Core/Src/motor_control.c
+    Core/Src/safety.c
+    Core/Src/can_handler.c
     Core/Src/sbus_handler.c
     Core/Src/lidar_sensor.c
 )

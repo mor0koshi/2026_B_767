@@ -2,12 +2,13 @@
 /**
  ******************************************************************************
  * @file           : function.c
- * @brief          : main.c から分離したユーザー定義関数
+ * @brief          : 足回り・ローラー・装填の制御と、PWM/DIR の出力
  ******************************************************************************
  */
 /* USER CODE END Header */
 #include "function.h"
-#include "lidar_sensor.h" /* safety() で lidar_timeout() を使用するため */
+#include "lidar_sensor.h"  /* asimawari() で Lidar の距離と lidar_timeout() を使うため */
+#include "motor_control.h" /* motor_control(), motor_simple_control() */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,200 +19,67 @@ int _write(int file, char *ptr, int len) {
     return len;
 }
 
-// CAN 送信 (固定ペイロード)。現在はどこからも呼ばれていない
-void CAN_TX(uint32_t recipient) {
-    // 送信用インスタンス等
-    CAN_TxHeaderTypeDef TxHeader;
-    uint32_t TxMailbox;
-    uint8_t TxData[8];
-    // 送信メールボックスに空きがあったら送信開始
-    if (0 < HAL_CAN_GetTxMailboxesFreeLevel(&hcan1)) {
-        // 送信用インスタンスの設定
-        TxHeader.StdId = recipient; // 受取手のCANのID
-        TxHeader.RTR = CAN_RTR_DATA;
-        TxHeader.IDE = CAN_ID_STD;
-        TxHeader.DLC = 8; // データ長を8byteに設定
-        TxHeader.TransmitGlobalTime = DISABLE;
-        // 各データ
-        TxData[0] = 1;
-        TxData[1] = 0;
-        TxData[2] = 0;
-        TxData[3] = 0;
-        TxData[4] = 0;
-        TxData[5] = 0;
-        TxData[6] = 0;
-        TxData[7] = 0;
-        // CANメッセージを送信
-        if (HAL_CAN_AddTxMessage(&hcan1, &TxHeader, TxData, &TxMailbox) != HAL_OK) {
-            Error_Handler();
-        }
-    }
-}
+/* ============================================================================
+ * 足回り
+ * ========================================================================== */
+
+// 足回りの PWM を 20ms あたり何ずつ目標値に近づけるか
+static const int DRIVE_STEP = 80;
+
 /*
- * CAN 受信割り込み。ID 0x001 の 8 バイトをそのまま use_data[] に写す。
- * use_data[0..3] はメインループで PV1〜PV4 (ローラーのエンコーダ値) になる。
- * last_can_rx は safety() の CAN 断判定に使う。
+ * 前後・左右・旋回の指令から、オムニ 4 輪それぞれの指令値を計算する。
+ * 手動・半自動・全自動のどのモードもこの式を使うので、式を変えるのはここだけでよい。
  */
-void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan1) {
-    CAN_RxHeaderTypeDef RxHeader; // 受信メッセージの情報が格納されるインスタンス
-    uint8_t RxData[8];            // 受信したデータを一時保存する配列
-    uint32_t id;                  // CANメッセージIDを格納する変数
-    if (HAL_CAN_GetRxMessage(hcan1, CAN_RX_FIFO0, &RxHeader, RxData) == HAL_OK) {
-        id = RxHeader.StdId;                    // RxHeaderの中に入っているidを取り出す
-        if (id == 0x001 && RxHeader.DLC >= 8) { // idが0x001でデータ長が8以上の場合
-            last_can_rx = HAL_GetTick();        // 受信時刻を更新
-            for (int i = 0; i <= 7; i++) {
-                use_data[i] = RxData[i];
-            }
-        }
-    }
+static void omni_mix(int forward, int strafe, int turn, int taiya[4]) {
+    taiya[0] = -forward + strafe + turn; // 左前 (pwm1)
+    taiya[1] = -forward - strafe + turn; // 右前 (pwm2)
+    taiya[2] = forward - strafe + turn;  // 左後 (pwm3)
+    taiya[3] = forward + strafe + turn;  // 右後 (pwm4)
 }
 
 /*
- * 速度制御 (積分制御)。エンコーダのあるローラーで使う。
+ * 走行モード (Rmayu1) に応じて前後・左右・旋回の指令を決め、足回り 4 輪を動かす。
+ * 20ms 周期で呼ぶこと (auto_mode() の dt がこの周期前提)。
  *
- * 積分器は pwm 自身。毎周期 pwm に MV(=誤差の1/10) を足し込むことで、
- * 誤差が 0 になるまで pwm が育っていく。
- *
- * remm は「積分項」ではなく、error/10 の整数除算で切り捨てられる端数の
- * 繰り越し(キャリー)。|rem| は必ず 10 未満に収まり、蓄積はしない。
- * これが無いと |error| < 10 の領域で MV が常に 0 になり、pwm が動かず
- * 定常偏差が残ったままになる。端数を持ち越すことでその不感帯を解消する。
- *
- * なお MV が maxMV で頭打ちになる場合、はみ出した分は繰り越さずに捨てる。
- * これは1周期あたりの変化量を制限するため(積分ワインドアップ防止)で、
- * キャリーが効くのは飽和していない = 定常付近の領域だけになる。
+ *   モード          前後              左右   旋回
+ *   -1 手動         ly                lx     rx
+ *    0 半自動       ly                lx     PID (auto_rx)
+ *    1 全自動       PID (auto_ly)     lx     PID (auto_rx)
  */
-void motor_control(int SV, int PV, int maxMV, int down_pwm, int max_pwm, int *pwmm, int *dirr, int *remm) {
-    int error = 0;
-    int MV = 0;
-    int lastMV = 0;
-    int pwm = *pwmm;
-    int target_dir = 0;
-    int dir = *dirr;
-    int rem = *remm; // 前回の端数を復元
+void asimawari(void) {
+    int d4 = distance4 - LIDAR_OFFSET4;
+    int d7 = distance7 - LIDAR_OFFSET7;
+    int taiya[4];
 
-    // リミッター処理
-    if (SV > max_pwm) {
-        SV = max_pwm;
-    } else if (SV < -max_pwm) {
-        SV = -max_pwm;
-    }
-
-    // dir設定と絶対値化
-    if (SV < 0) {
-        target_dir = 0;
-        SV = -SV;
-    } else if (SV > 0) {
-        target_dir = 1;
-    }
-
-    error = SV - PV;
-
-    rem += error;   // ① 今回の誤差に前回の端数を足す
-    MV = rem / 10;  // ② 10 で割れるぶんだけ操作量にする(Ki=0.1)
-    rem -= MV * 10; // ③ 使ったぶんを引き、端数(|rem| < 10)だけ残す
-
-    if (MV > maxMV) {
-        lastMV = maxMV;
-    } else if (MV < -maxMV) {
-        lastMV = -maxMV;
+    // Lidar が途絶えていると auto_mode は「壁まで遠すぎる」と誤認して全速で走り続ける。
+    // 測定値が途絶えている間は Rmayu1 によらず手動モードにする。
+    if (Rmayu1 == -1 || lidar_timeout()) {
+        // 手動モード。裏で PID をリセットしておく。
+        // 目標距離は全自動モードと必ず揃えること (違うと切替時に D 項が跳ねる)
+        auto_mode(d4, d7, 1, AUTO_TARGET_DIST_MM);
+        omni_mix(ly, lx, -rx, taiya);
+        for (int i = 0; i < 4; i++) {
+            taiya[i] = taiya[i] * 9 / 10; // 1 軸を倒しきったとき、ちょうど maxpwm (900) になる
+        }
+    } else if (Rmayu1 == 0) {
+        // 半自動モード。目標距離に現在距離を渡して距離の誤差を 0 にし、旋回の PID だけ効かせる
+        auto_mode(d4, d7, 0, (d4 + d7) / 2);
+        omni_mix(ly, lx, auto_rx, taiya);
     } else {
-        lastMV = MV;
+        // 全自動モード。auto_ly は ly と符号が逆 (PID 出力の符号は実機合わせ)
+        auto_mode(d4, d7, 0, AUTO_TARGET_DIST_MM);
+        omni_mix(-auto_ly, lx, auto_rx, taiya);
     }
 
-    // 回転方向が目標と異なる場合,一旦pwmを0まで落としてから方向を変える
-    if (SV != 0) {
-        if (dir != target_dir) {
-            rem = 0; // 方向転換中は端数を捨てる
-            if (pwm > down_pwm) {
-                pwm -= down_pwm;
-            } else {
-                pwm = 0;
-                dir = target_dir;
-            }
-        } else {
-            pwm += lastMV;
-            if (pwm < 0) {
-                pwm = 0;
-            }
-        }
-    }
-
-    if (pwm > max_pwm) {
-        pwm = max_pwm;
-    }
-
-    // 指令値が 0 のときは緩やかにモーターを停止させる
-    if (SV == 0) {
-        rem = 0; // 停止指令中は端数を捨てる
-        if (pwm > down_pwm) {
-            pwm -= down_pwm;
-        } else {
-            pwm = 0;
-        }
-    }
-
-    *pwmm = pwm;
-    *dirr = dir;
-    *remm = rem;
+    motor_simple_control(taiya[0], DRIVE_STEP, maxpwm, &pwm1, &dir1);
+    motor_simple_control(taiya[1], DRIVE_STEP, maxpwm, &pwm2, &dir2);
+    motor_simple_control(taiya[2], DRIVE_STEP, maxpwm, &pwm3, &dir3);
+    motor_simple_control(taiya[3], DRIVE_STEP, maxpwm, &pwm4, &dir4);
 }
-/*
- * エンコーダを使わない簡易版。足回りで使う。
- * 目標値(SV)に向けて1回の呼び出しごとにstepずつpwmを近づける。
- * SV の符号が回転方向を表し (負 = dir 0 / 正 = dir 1)、絶対値がそのまま目標 pwm になる。
- * 方向転換と停止は motor_control と同じ扱いで、どちらも step ずつ pwm を落としてから行う。
- */
-void motor_simple_control(int SV, int step, int max_pwm, int *pwmm, int *dirr) {
-    int pwm = *pwmm;
-    int dir = *dirr;
-    int target_dir = dir;
 
-    // リミッター処理
-    if (SV > max_pwm) {
-        SV = max_pwm;
-    } else if (SV < -max_pwm) {
-        SV = -max_pwm;
-    }
-
-    // dir設定と絶対値化
-    if (SV < 0) {
-        target_dir = 0;
-        SV = -SV;
-    } else if (SV > 0) {
-        target_dir = 1;
-    }
-
-    if (SV == 0) {
-        // 指令値が 0 のときは緩やかにモーターを停止させる
-        if (pwm > step) {
-            pwm -= step;
-        } else {
-            pwm = 0;
-        }
-    } else if (dir != target_dir) {
-        // 回転方向が目標と異なる場合、一旦 pwm を 0 まで落としてから方向を変える
-        if (pwm > step) {
-            pwm -= step;
-        } else {
-            pwm = 0;
-            dir = target_dir;
-        }
-    } else if (pwm < SV) {
-        pwm += step;
-        if (pwm > SV) {
-            pwm = SV;
-        }
-    } else if (pwm > SV) {
-        pwm -= step;
-        if (pwm < SV) {
-            pwm = SV;
-        }
-    }
-
-    *pwmm = pwm;
-    *dirr = dir;
-}
+/* ============================================================================
+ * ローラー
+ * ========================================================================== */
 
 // ローラーの目標速度。エンコーダ値 (PV) と同じ 0〜255 系で、TIM1 の Period 254 以下にすること
 static const int ROLLER_SPEED = 245;         // 下ローラー
@@ -226,234 +94,132 @@ uint32_t time4 = 0;
 uint32_t time5 = 0;
 int set_flag1 = 0;
 int set_flag2 = 0;
+
+// 上ローラーの目標速度を Ltuno1 で選ぶ
+static int upper_roller_speed(void) {
+    switch (Ltuno1) {
+    case 1:
+        return BAKETU3_ROLLER_SPEED;
+    case 0:
+        return BAKETU2_ROLLER_SPEED;
+    case -1:
+        return BAKETU1_ROLLER_SPEED;
+    }
+    return ROLLER_STOP; // Ltuno1 は -1/0/1 しか取らないので、ここには来ない
+}
+
+// ローラー 1 個分の速度制御。4 個とも同じ制御パラメータを使う
+static void roller_motor(int speed, int PV, int *pwm, int *rem) {
+    motor_control(speed, PV, 5, 20, 250, pwm, &dummy, rem);
+}
+
 /*
- * ローラーの目標速度を決める。20ms 周期で呼ぶこと。
+ * ローラーの目標速度を決めて速度制御する。20ms 周期で呼ぶこと。
  *
  * モーター割り当て (2026/09 のモーター載せ替え後)
  *   上ローラー : pwm5 / pwm7  (エンコーダ PV1 / PV2 付きの閉ループ)
  *   下ローラー : pwm6 / pwm8  (エンコーダ PV3 / PV4 付きの閉ループ)
- *   装填       : pwm9 (装填1) / pwm10 (装填2) … 駆動は main.c。ここではローラー停止時に止めるだけ
  *
  * Lmayu2 == 1 のときだけ回す。上下は Lmayu1 で切り替えるので同時には回らない。
- * 上ローラーの速度は Ltuno1 で選ぶ。
+ * 止めるローラーも目標 0 で速度制御し、緩やかに減速させる。
  */
 void roller(void) {
-    switch (Lmayu2) {
-    case 1: // ローラー回転
+    int roller_on = (Lmayu2 == 1);
+    int upper = (roller_on && Lmayu1 == 1) ? upper_roller_speed() : ROLLER_STOP;
+    int lower = (roller_on && Lmayu1 == 0) ? ROLLER_SPEED : ROLLER_STOP;
 
-        if (Lmayu1 == 1) { // 上ローラー
+    roller_motor(upper, PV1, &pwm5, &rem5);
+    roller_motor(upper, PV2, &pwm7, &rem7);
+    roller_motor(lower, PV3, &pwm6, &rem6);
+    roller_motor(lower, PV4, &pwm8, &rem8);
+}
 
-            if (Ltuno1 == 1) { // 200
-                motor_control(BAKETU3_ROLLER_SPEED, PV1, 5, 20, 245, &pwm5, &dummy, &rem5);
-                motor_control(BAKETU3_ROLLER_SPEED, PV2, 5, 20, 245, &pwm7, &dummy, &rem7);
+/* ============================================================================
+ * 電磁弁と装填
+ * ========================================================================== */
 
-                motor_control(ROLLER_STOP,PV3, 5, 20,245, &pwm6, &dummy, &rem6);
-                motor_control(ROLLER_STOP,PV4, 5, 20,245, &pwm8, &dummy, &rem8);
+// 装填モーターの PWM (TIM3 の Period 999 に対して 60%)。送りも原点復帰も同じ値
+static const int LOADER_PWM = 600;
 
+// 逆転リセットのリミットスイッチ。ノイズ除去して読む (limit_read)
+static limit_sw sw_lock6 = LIMIT_SW_INIT(lock6_GPIO_Port, lock6_Pin); // 装填1 リセット開始
+static limit_sw sw_lock7 = LIMIT_SW_INIT(lock7_GPIO_Port, lock7_Pin); // 装填1 原点
+static limit_sw sw_lock8 = LIMIT_SW_INIT(lock8_GPIO_Port, lock8_Pin); // 装填2 リセット開始
+static limit_sw sw_lock9 = LIMIT_SW_INIT(lock9_GPIO_Port, lock9_Pin); // 装填2 原点
 
-            }
-
-            else if (Ltuno1 == 0) { // 150
-
-                motor_control(BAKETU2_ROLLER_SPEED, PV1, 5, 20, 245, &pwm5, &dummy, &rem5);
-                motor_control(BAKETU2_ROLLER_SPEED, PV2, 5, 20, 245, &pwm7, &dummy, &rem7);
-
-                motor_control(ROLLER_STOP,PV3, 5, 20,245, &pwm6, &dummy, &rem6);
-                motor_control(ROLLER_STOP,PV4, 5, 20,245, &pwm8, &dummy, &rem8);
-
-
-
-            }
-
-            else if (Ltuno1 == -1) { // 100
-
-                motor_control(BAKETU1_ROLLER_SPEED, PV1, 5, 20, 245, &pwm5, &dummy, &rem5);
-                motor_control(BAKETU1_ROLLER_SPEED, PV2, 5, 20, 245, &pwm7, &dummy, &rem7);
-
-                motor_control(ROLLER_STOP,PV3, 5, 20,245, &pwm6, &dummy, &rem6);
-                motor_control(ROLLER_STOP,PV4, 5, 20,245, &pwm8, &dummy, &rem8);
-
-
-            }
-        } else if (Lmayu1 == 0) { // 下ローラー
-
-            motor_control(ROLLER_STOP, PV1, 5, 20, 245, &pwm5, &dummy, &rem5);
-            motor_control(ROLLER_STOP, PV2, 5, 20, 245, &pwm7, &dummy, &rem7);
-
-            motor_control(ROLLER_SPEED, PV3, 5, 20, 245, &pwm6, &dummy, &rem6);
-            motor_control(ROLLER_SPEED, PV4, 5, 20, 245, &pwm8, &dummy, &rem8);
-
-
-        }
-
-        break;
-
-    case 0: // ローラー停止
-        // 装填
-        pwm9 = 0;
-        pwm10 = 0;
-
-        motor_control(ROLLER_STOP, PV1, 5, 20, 245, &pwm5, &dummy, &rem5);
-        motor_control(ROLLER_STOP, PV2, 5, 20, 245, &pwm7, &dummy, &rem7);
-
-        motor_control(ROLLER_STOP, PV3, 5, 20, 245, &pwm6, &dummy, &rem6);
-        motor_control(ROLLER_STOP, PV4, 5, 20, 245, &pwm8, &dummy, &rem8);
-
-        break;
+/*
+ * 原点復帰フラグを更新する。
+ * lock6/lock8 で立ち、原点の lock7/lock9 で下りる (両方踏んでいれば原点側が勝つ)。
+ * 原点リミットは「復帰の終了」だけを担当させる。原点で pwm を直接 0 にすると、
+ * 原点で静止している間は通常の正転指令まで毎周回打ち消されてしまう。
+ */
+static void update_homing(void) {
+    if (limit_read(&sw_lock6) == 0) {
+        reset_flag1 = 1;
+    }
+    if (limit_read(&sw_lock7) == 0) {
+        reset_flag1 = 0;
+    }
+    if (limit_read(&sw_lock8) == 0) {
+        reset_flag2 = 1;
+    }
+    if (limit_read(&sw_lock9) == 0) {
+        reset_flag2 = 0;
     }
 }
 
 /*
- * 2 つの Lidar の距離から、壁との距離と平行を保つ仮想スティック値を計算する。
- *   auto_ly … 距離 (平均) の PID。前後移動
- *   auto_rx … 角度 (差分) の PID。旋回
- * 20ms 周期で呼ぶこと (dt が固定)。reset_flag = 1 で積分をリセットして 0 を返す。
+ * 電磁弁と装填モーターを動かす。毎周回呼ぶ。
+ *
+ *   Rtuno2 (撃つ)  ローラー   動作
+ *   0              -          電磁弁も装填も止める
+ *   1              停止中     Rmayu2 で選んだ電磁弁を開く (0=lock1 / 1=lock2)
+ *   1              下が回転   装填1 (pwm9) を正転
+ *   1              上が回転   装填2 (pwm10) を正転
+ *
+ * 原点復帰中は、上の結果によらず装填モーターを逆転させる。
  */
-void auto_mode(int distance1, int distance2, int reset_flag, int target_dist) {
-    typedef struct {
-        float Kp;
-        float Ki;
-        float Kd;
-        float prev_error;
-        float integral;
-    } PID;
-    // 距離用(横移動)と角度用(旋回)のPID実体を作成（ゲインは実機で要調整）
-    static PID distance = {1.3, 0.008, 0.05, 0, 0};
-    static PID angle = {0.6, 0.01, 0.2, 0, 0};
-    float target_distance = target_dist; // 目標距離 (mm)
-    float dt = 0.02;                     // 20ms周期
+void loader(void) {
+    int shoot = (Rtuno2 == 1);
+    int roller_on = (Lmayu2 == 1);
 
-    // --- 距離（平均）と角度（差分）の計算 ---
-    float current_dist = (distance1 + distance2) / 2.0; // 現在の距離
-    float error_dist = current_dist - target_distance;  // 距離のズレ
-    float error_angle = distance1 - distance2;          // 角度のズレ
+    update_homing();
 
-    // --- モード切替時のリセット処理 ---
-    // ゲイン(Ki)ではなく積分値(integral)を消すこと。
-    // Ki を 0 にすると static なので電源を切るまで I 制御が復活しない。
-    if (reset_flag == 1) {
-        distance.integral = 0;
-        distance.prev_error = error_dist;
-        angle.integral = 0;
-        angle.prev_error = error_angle;
-        auto_ly = 0;
-        auto_rx = 0;
-        return;
-    }
-
-    // --- 1. 距離を保つためのPID（前後移動 auto_ly を計算） ---
-    distance.integral += error_dist * dt;
-    if (distance.integral > 2000)
-        distance.integral = 2000; // 暴走防止
-    if (distance.integral < -2000)
-        distance.integral = -2000;
-
-    float derivative_dist = (error_dist - distance.prev_error) / dt;
-
-    // ※ 符号は実機の「mae移動がプラスかマイナスか」に合わせて反転させてください
-    auto_ly = (int)((distance.Kp * error_dist) + (distance.Ki * distance.integral) + (distance.Kd * derivative_dist));
-    distance.prev_error = error_dist;
-
-    // --- 2. 平行にするためのPID（旋回力 rx を計算） ---
-    angle.integral += error_angle * dt;
-    if (angle.integral > 2000)
-        angle.integral = 2000; // 暴走防止
-    if (angle.integral < -2000)
-        angle.integral = -2000;
-
-    float derivative_angle = (error_angle - angle.prev_error) / dt;
-
-    // ※ 符号は実機の「右旋回がプラスかマイナスか」に合わせて反転させてください
-    auto_rx = (int)((angle.Kp * error_angle) + (angle.Ki * angle.integral) + (angle.Kd * derivative_angle));
-    angle.prev_error = error_angle;
-}
-
-void safety(void) {
-    int sbus_error = 0;
-    int can_error = 0;
-    uint8_t blink_state = (now / 300) % 2;
-
-    /*
-     * SBUS断の判定は3つを併用する。
-     *   1. last_sbus_rx のタイムアウト … 受信が完全に途絶えた場合。
-     *      SBUS_CH も SBUS_LostFrame もフレームが来たときしか更新されないため、
-     *      コネクタが抜けると古い値のまま固まる。これが無いと直前のスティック
-     *      指令のまま走り続けてしまう。
-     *   2. SBUS_Failsafe … 「受信機が送信機を見失った」決定的な信号。
-     *      送信機の電源を切っても受信機は正常なフレームを送り続け、このビット
-     *      だけを立てるので、1 でも 3 でも捕まえられない。
-     *   3. SBUS_LostFrame … 単発のフレーム落ち。
-     *   SBUS_CH[0] == 0 は起動直後(まだ1フレームも来ていない)の保険。
-     *   HAL_GetTick() がまだ SBUS_TIMEOUT_MS に満たない間は 1 が効かないため。
-     */
-    if (HAL_GetTick() - last_sbus_rx > SBUS_TIMEOUT_MS || SBUS_Failsafe || SBUS_LostFrame ||
-        SBUS_CH[0] == 0) {
-        sbus_error = 1;
+    // 電磁弁: ローラー停止中に撃つときだけ使う
+    int use_solenoid = shoot && !roller_on;
+    if (use_solenoid && Rmayu2 == 0) {
+        HAL_GPIO_WritePin(lock1_GPIO_Port, lock1_Pin, 1);
     } else {
-        sbus_error = 0;
+        HAL_GPIO_WritePin(lock1_GPIO_Port, lock1_Pin, 0);
     }
-    if (HAL_GetTick() - last_can_rx > 100) {
-        can_error = 1;
+    if (use_solenoid && Rmayu2 == 1) {
+        HAL_GPIO_WritePin(lock2_GPIO_Port, lock2_Pin, 1);
     } else {
-        can_error = 0;
-    }
-    // SBUSの値とCANが来ていない場合、モーターを停止
-    if (sbus_error == 1 || can_error == 1) {
-        pwm1 = 0;
-        pwm2 = 0;
-        pwm3 = 0;
-        pwm4 = 0;
-        pwm5 = 0;
-        pwm6 = 0;
-        pwm7 = 0;
-        pwm8 = 0;
-        pwm9 = 0;
-        pwm10 = 0;
-    }
-    // ローラーと足回りが同時に全力で回らないようにする（電源の取り合い対策）
-    // 足回り(pwm1〜pwm4)が1つでも回っている間は、ローラー(pwm5〜pwm8)の PWM を
-    // 100 (TIM1 の Period 254 に対して約 40%) で頭打ちにする。速度ではなく PWM の上限。
-    // motor_simple_control は停止指令のとき必ず 0 まで落とすので、
-    // 停止中の足回りを「回っている」と誤判定することはない。
-    if (pwm1 > 0 || pwm2 > 0 || pwm3 > 0 || pwm4 > 0) {
-        if (pwm5 > 100) {
-            pwm5 = 100;
-        }
-        if (pwm7 > 100) {
-            pwm7 = 100;
-        }
-        if (pwm6 > 100) {
-            pwm6 = 100;
-        }
-        if (pwm8 > 100) {
-            pwm8 = 100;
-        }
-    }
-    /*
-     * LEDは「点灯状態を全部決めてから3本まとめて書く」。
-     * 条件ごとにその場で WritePin すると、条件が変わったときに前の色を
-     * 消し忘れて赤と青が同時に点く、といった消え残りが起きる。
-     *
-     * 青点滅 = SBUS断、赤点滅 = CAN断（両方落ちていれば紫点滅になる）、
-     * 緑点滅 = Lidar断で自動モードが使えない、緑点灯 = 全て正常。
-     */
-    uint8_t green = 0;
-    uint8_t blue = 0;
-    uint8_t red = 0;
-
-    if (sbus_error == 1) {
-        blue = blink_state;
-    }
-    if (can_error == 1) {
-        red = blink_state;
-    }
-    if (sbus_error == 0 && can_error == 0) {
-        green = lidar_timeout() ? blink_state : 1;
+        HAL_GPIO_WritePin(lock2_GPIO_Port, lock2_Pin, 0);
     }
 
-    HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, green);
-    HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, blue);
-    HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, red);
+    // 装填: ローラー回転中に撃つとき、回っている方のローラーへ球を送る
+    int feed = shoot && roller_on;
+    pwm9 = 0;
+    pwm10 = 0;
+    if (feed && Lmayu1 == 0) { // 下ローラー → 装填1
+        pwm9 = LOADER_PWM;
+        roller_dir1 = 1;
+    }
+    if (feed && Lmayu1 == 1) { // 上ローラー → 装填2
+        pwm10 = LOADER_PWM;
+        roller_dir2 = 1;
+    }
+
+    // 原点復帰中は優先して逆転させる
+    if (reset_flag1 == 1) {
+        pwm9 = LOADER_PWM;
+        roller_dir1 = 0;
+    }
+    if (reset_flag2 == 1) {
+        pwm10 = LOADER_PWM;
+        roller_dir2 = 0;
+    }
 }
 
 /*
@@ -479,4 +245,114 @@ uint8_t limit_read(limit_sw *sw) {
     }
 
     return sw->stable;
+}
+
+/* ============================================================================
+ * Lidar による自動走行 (PID)
+ * ========================================================================== */
+
+typedef struct {
+    float Kp;
+    float Ki;
+    float Kd;
+    float prev_error;
+    float integral;
+} PID;
+
+static const float PID_DT = 0.02;               // 20ms 周期
+static const float PID_INTEGRAL_LIMIT = 2000;   // 積分の暴走防止
+
+// 積分をリセットする。ゲイン(Ki)ではなく積分値を消すこと。
+// Ki を 0 にすると static なので電源を切るまで I 制御が復活しない。
+static void pid_reset(PID *pid, float error) {
+    pid->integral = 0;
+    pid->prev_error = error;
+}
+
+// 誤差から PID の出力を計算する
+static float pid_update(PID *pid, float error) {
+    pid->integral += error * PID_DT;
+    if (pid->integral > PID_INTEGRAL_LIMIT)
+        pid->integral = PID_INTEGRAL_LIMIT;
+    if (pid->integral < -PID_INTEGRAL_LIMIT)
+        pid->integral = -PID_INTEGRAL_LIMIT;
+
+    float derivative = (error - pid->prev_error) / PID_DT;
+    pid->prev_error = error;
+
+    return (pid->Kp * error) + (pid->Ki * pid->integral) + (pid->Kd * derivative);
+}
+
+/*
+ * 2 つの Lidar の距離から、壁との距離と平行を保つ仮想スティック値を計算する。
+ *   auto_ly … 距離 (平均) の PID。前後移動
+ *   auto_rx … 角度 (差分) の PID。旋回
+ * 20ms 周期で呼ぶこと (dt が固定)。reset_flag = 1 で積分をリセットして 0 を返す。
+ *
+ * ※ 出力の符号は実機の「前進/右旋回がプラスかマイナスか」に合わせて反転させること
+ */
+void auto_mode(int distance1, int distance2, int reset_flag, int target_dist) {
+    // ゲインは実機で要調整 (Kp, Ki, Kd)
+    static PID distance = {1.3, 0.008, 0.05, 0, 0};
+    static PID angle = {0.6, 0.01, 0.2, 0, 0};
+
+    float target_distance = target_dist;                // 目標距離 (mm)
+    float current_dist = (distance1 + distance2) / 2.0; // 現在の距離
+    float error_dist = current_dist - target_distance;  // 距離のズレ
+    float error_angle = distance1 - distance2;          // 角度のズレ
+
+    if (reset_flag == 1) {
+        pid_reset(&distance, error_dist);
+        pid_reset(&angle, error_angle);
+        auto_ly = 0;
+        auto_rx = 0;
+        return;
+    }
+
+    auto_ly = (int)pid_update(&distance, error_dist);
+    auto_rx = (int)pid_update(&angle, error_angle);
+}
+
+/* ============================================================================
+ * 出力
+ * ========================================================================== */
+
+/*
+ * PWM と DIR をまとめて出力する。
+ *
+ * 基板 (2026_B_main) は PWMn と DIRn が同じドライバへ行く配線なので、
+ * DIR はソフトの pwmN 番号ではなく「その PWM が出ている基板ch の DIR」を書く。
+ * 例: pwm1 の PWM は PD15 = 基板の PWM3 なので、DIR は d3 (PE10)。
+ */
+void motor_outputs(void) {
+    // 足回り
+    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_4, pwm1); // 左前 = 基板ch3 (PWM3=PD15)
+    HAL_GPIO_WritePin(d3_GPIO_Port, d3_Pin, dir1);      // DIR3 = PE10
+    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_3, pwm2); // 右前 = 基板ch4 (PWM4=PD14)
+    HAL_GPIO_WritePin(d4_GPIO_Port, d4_Pin, dir2);      // DIR4 = PD11
+    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, pwm3); // 左後 = 基板ch1 (PWM1=PD12)
+    HAL_GPIO_WritePin(d1_GPIO_Port, d1_Pin, dir3);      // DIR1 = PB1
+    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, pwm4); // 右後 = 基板ch2 (PWM2=PD13)
+    HAL_GPIO_WritePin(d2_GPIO_Port, d2_Pin, dir4);      // DIR2 = PB2
+
+    // ローラーは常に一方向なので DIR は固定値。
+    // 対になる 2 個は向かい合っているので、逆の値にして互いに逆回転させる。
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, pwm5); // 上ローラー = 基板ch7 (PWM7=PE11)
+    HAL_GPIO_WritePin(d7_GPIO_Port, d7_Pin, 0);         // DIR7 = PF12
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pwm6); // 下ローラー = 基板ch8 (PWM8=PE9)
+    HAL_GPIO_WritePin(d8_GPIO_Port, d8_Pin, 0);         // DIR8 = PF13
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, pwm7); // 上ローラー = 基板ch5 (PWM5=PE13)
+    HAL_GPIO_WritePin(d5_GPIO_Port, d5_Pin, 1);         // DIR5 = PF3
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_4, pwm8); // 下ローラー = 基板ch6 (PWM6=PE14)
+    HAL_GPIO_WritePin(d6_GPIO_Port, d6_Pin, 1);         // DIR6 = PF14
+
+    // 装填は正転/逆転リセットがあるので DIR は roller_dir を出す
+    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, pwm9);    // 装填1 = 基板ch10 (PWM10=PC7)
+    HAL_GPIO_WritePin(d10_GPIO_Port, d10_Pin, roller_dir1); // DIR10 = PA11
+    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pwm10);   // 装填2 = 基板ch9 (PWM9=PC6)
+    HAL_GPIO_WritePin(d9_GPIO_Port, d9_Pin, roller_dir2);   // DIR9 = PA12
+
+    // 予備 (未使用)
+    // __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, pwm11); // 基板ch11 (PWM11=PC8), DIR11 = PB12
+    // __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, pwm12); // 基板ch12 (PWM12=PC9), DIR12 = PB11
 }
