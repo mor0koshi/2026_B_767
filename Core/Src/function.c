@@ -88,6 +88,12 @@ static const int BAKETU2_ROLLER_SPEED = 150; // 上ローラー Ltuno1 == 0
 static const int BAKETU3_ROLLER_SPEED = 200; // 上ローラー Ltuno1 == 1
 static const int ROLLER_STOP = 0;
 
+// 目標速度との差がこれ以内なら「目標速度に達した」とみなす (PV と同じ 0〜255 系)
+static const int ROLLER_READY_TOLERANCE = 10;
+
+// 回しているローラーが目標速度に達していれば 1。roller() が立て、safety() の color() が LED を点滅させる
+int roller_ready = 0;
+
 // 未使用
 uint32_t time3 = 0;
 uint32_t time4 = 0;
@@ -113,6 +119,11 @@ static void roller_motor(int speed, int PV, int *pwm, int *rem) {
     motor_control(speed, PV, 5, 20, 250, pwm, &dummy, rem);
 }
 
+// 目標速度 speed に PV が達していれば 1。止めているローラー (speed == 0) は常に 0
+static int roller_at_speed(int speed, int PV) {
+    return speed != ROLLER_STOP && abs(speed - PV) <= ROLLER_READY_TOLERANCE;
+}
+
 /*
  * ローラーの目標速度を決めて速度制御する。20ms 周期で呼ぶこと。
  *
@@ -132,6 +143,10 @@ void roller(void) {
     roller_motor(upper, PV2, &pwm7, &rem7);
     roller_motor(lower, PV3, &pwm6, &rem6);
     roller_motor(lower, PV4, &pwm8, &rem8);
+
+    // 回している方の 2 個が両方とも目標速度に達したらフラグを立てる
+    roller_ready = (roller_at_speed(upper, PV1) && roller_at_speed(upper, PV2)) ||
+                   (roller_at_speed(lower, PV3) && roller_at_speed(lower, PV4));
 }
 
 /* ============================================================================
@@ -167,6 +182,7 @@ static void update_homing(void) {
         reset_flag2 = 0;
     }
 }
+
 
 /*
  * 電磁弁と装填モーターを動かす。毎周回呼ぶ。

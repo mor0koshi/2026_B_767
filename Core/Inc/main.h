@@ -115,6 +115,8 @@ void Error_Handler(void);
 #define STLK_RX_GPIO_Port GPIOD
 #define STLK_TX_Pin GPIO_PIN_9
 #define STLK_TX_GPIO_Port GPIOD
+#define lock5_Pin GPIO_PIN_10
+#define lock5_GPIO_Port GPIOD
 #define d4_Pin GPIO_PIN_11
 #define d4_GPIO_Port GPIOD
 #define m1_Pin GPIO_PIN_12

@@ -66,6 +66,9 @@ extern int dummy;
 extern int auto_ly;
 extern int auto_rx;
 
+/* 共有変数 (function.c で定義) */
+extern int roller_ready; /* ローラーが目標速度に達していれば 1 (roller() が更新) */
+
 extern uint32_t now;
 
 /* 関数プロトタイプ */

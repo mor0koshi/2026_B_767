@@ -15,6 +15,9 @@
 // 走行中のローラーの PWM 上限 (TIM1 の Period 254 に対して約 40%)
 static const int ROLLER_PWM_WHILE_DRIVING = 100;
 
+// color() に渡す自チームの色 (0 = 赤 / 1 = 青)。試合前に合わせること
+static const int TEAM_COLOR = 0;
+
 /*
  * SBUS が使えない状態なら 1 を返す。次の 4 つのどれかで判定する。
  *   1. last_sbus_rx のタイムアウト … 受信が完全に途絶えた場合。
@@ -46,6 +49,34 @@ static void limit_pwm(int *pwm, int max) {
 }
 
 /*
+ * lock3〜lock5 の LED を自チームの色で光らせる (color: 0 = 赤 / 1 = 青)。
+ * ローラーが目標速度に達している間 (roller_ready == 1) は点滅、それ以外は点灯。
+ * SBUS 断・CAN 断のときはチームの色より優先して、update_status_led() と同じ点滅を出す
+ * (青点滅 = SBUS断、赤点滅 = CAN断、両方なら紫点滅)。
+ */
+static void color(int color, int sbus_error, int can_error){
+    uint8_t blink = (now / 300) % 2;
+    uint8_t on = roller_ready ? blink : 1;
+    uint8_t blue = sbus_error ? blink : 0;
+    uint8_t red = can_error ? blink : 0;
+
+    if(sbus_error || can_error){
+        HAL_GPIO_WritePin(lock3_GPIO_Port, lock3_Pin, 0);//green
+        HAL_GPIO_WritePin(lock4_GPIO_Port, lock4_Pin, red);//red
+        HAL_GPIO_WritePin(lock5_GPIO_Port, lock5_Pin, blue);//blue
+    }else if(color == 0){
+        HAL_GPIO_WritePin(lock3_GPIO_Port, lock3_Pin, 0);//green
+        HAL_GPIO_WritePin(lock4_GPIO_Port, lock4_Pin, on);//red
+        HAL_GPIO_WritePin(lock5_GPIO_Port, lock5_Pin, 0);//blue
+    }else if(color == 1){
+        HAL_GPIO_WritePin(lock3_GPIO_Port, lock3_Pin, 0);//green
+        HAL_GPIO_WritePin(lock4_GPIO_Port, lock4_Pin, 0);//red
+        HAL_GPIO_WritePin(lock5_GPIO_Port, lock5_Pin, on);//blue
+    }
+
+}
+
+/*
  * LEDは「点灯状態を全部決めてから3本まとめて書く」。
  * 条件ごとにその場で WritePin すると、条件が変わったときに前の色を
  * 消し忘れて赤と青が同時に点く、といった消え残りが起きる。
@@ -66,6 +97,7 @@ static void update_status_led(int sbus_error, int can_error) {
     HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, green);
     HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, blue);
     HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, red);
+
 }
 
 /*
@@ -89,6 +121,10 @@ void safety(void) {
         pwm8 = 0;
         pwm9 = 0;
         pwm10 = 0;
+
+        // CAN 断だとエンコーダ値 (PV) が古いまま固まり、roller() が「到達」と誤判定しうる。
+        // モーターを止めている間は発射準備完了ではないので、フラグを下ろしておく
+        roller_ready = 0;
     }
 
     // ローラーと足回りが同時に全力で回らないようにする（電源の取り合い対策）。
@@ -103,4 +139,5 @@ void safety(void) {
     }
 
     update_status_led(sbus_error, can_error);
+    color(TEAM_COLOR, sbus_error, can_error);
 }
