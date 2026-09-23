@@ -32,12 +32,12 @@ static const int TEAM_COLOR = 0;
  *      HAL_GetTick() がまだ SBUS_TIMEOUT_MS に満たない間は 1 が効かないため。
  */
 static int sbus_lost(void) {
-    return HAL_GetTick() - last_sbus_rx > SBUS_TIMEOUT_MS || SBUS_Failsafe || SBUS_LostFrame ||
+    return HAL_GetTick() - last_sbus_rx > SBUS_TIMEOUT_MS || SBUS_Failsafe ||
            SBUS_CH[0] == 0;
 }
 
 // CAN が 100ms 以上届いていなければ 1 を返す
-static int can_lost(void) {
+sta|| SBUS_LostFrame tic int can_lost(void) {
     return HAL_GetTick() - last_can_rx > 100;
 }
 
