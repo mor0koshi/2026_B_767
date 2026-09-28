@@ -19,12 +19,12 @@
 #define BATTERY_FULL_MV 21000
 
 /* ---- RS-555 (装填1 pwm9 / 装填2 pwm10、TIM3) ---- */
-#define RS555_RATED_MV 12000
+#define RS555_RATED_MV 12000 //12V
 #define SOUTEN_PWM_FULL 1000 // TIM3 の Period 999 + 1 = duty 100%
 // duty の上限 = 12V / 21V ≒ 57% → 571。装填はこの値で回す
 #define SOUTEN_PWM_MAX (SOUTEN_PWM_FULL * RS555_RATED_MV / BATTERY_FULL_MV)
 // 0 から SOUTEN_PWM_MAX まで上げる (下げる) のにかける時間。反転は「下げる + 上げる」でこの 2 倍かかる
-#define SOUTEN_RAMP_MS 200
+#define SOUTEN_RAMP_MS 200//ms
 // 1 周期あたりの変化量。切り上げて、ランプが SOUTEN_RAMP_MS より長くならないようにする
 #define SOUTEN_RAMP_STEP ((SOUTEN_PWM_MAX * CONTROL_PERIOD_MS + SOUTEN_RAMP_MS - 1) / SOUTEN_RAMP_MS)
 

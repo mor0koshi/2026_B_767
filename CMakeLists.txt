@@ -45,13 +45,18 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
-    Core/Src/function.c
+    Core/Src/asimawari.c
+    Core/Src/roller.c
+    Core/Src/hassya.c
+    Core/Src/limit_sw.c
+    Core/Src/output.c
     Core/Src/motor_control.c
     Core/Src/safety.c
     Core/Src/can_handler.c
     Core/Src/sbus_handler.c
     Core/Src/lidar_sensor.c
     Core/Src/solenoid.c
+    Core/Src/led.c
 )
 
 # Add include paths

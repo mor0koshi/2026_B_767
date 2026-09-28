@@ -12,8 +12,8 @@ STM32F767ZI をベースにした、4輪オムニ駆動ロボットの制御フ�
 - **操作入力**: SBUS（UART5、100000bps / 偶数パリティ / ストップビット2 / 信号反転）
 - **フィードバック**: CAN1（1Mbps）で ID `0x001` の8バイトを受信し、ローラーのエンコーダ値として使う
 - **センサー**: PONO TSD20 単点 ToF Lidar ×2（UART4・UART7、460800bps、循環DMA受信）
-- **安全機構**: SBUS断線・送信機OFF・CAN断の検出による全停止と電磁弁の閉鎖、HardFault 時の全停止、Lidar途絶時の自動モード禁止、走行中のローラー出力制限、装填の電圧制限、ステータスLED
-- **表示**: 基板の LED（LD1〜LD3）で状態、LED テープ（lock3〜lock5）でチームの色とローラーの準備完了を表示
+- **安全機構**: SBUS断線・送信機OFF・CAN断の検出による全停止と電磁弁の閉鎖、撃つスイッチの押し直し（インターロック）、HardFault 時の全停止、Lidar途絶時の自動モード禁止、走行中のローラー出力制限、装填の電圧制限、ステータスLED
+- **表示**: 基板の LED（LD1〜LD3）で状態、LED テープ（lock3〜lock5）でチームの色とローラーの準備完了を表示。チームの色は USER ボタンの長押しで切り替え
 
 ## 名前の読み方
 
@@ -22,10 +22,11 @@ STM32F767ZI をベースにした、4輪オムニ駆動ロボットの制御フ�
 | 名前 | 意味 |
 |---|---|
 | `asimawari` | 足回り |
+| `hassya` | 発射（撃ってよいかを決める。撃つスイッチの押し直しの確認） |
 | `souten` | 装填（装填モーター。`souten1` = 装填1、`souten2` = 装填2） |
 | `taiya` | タイヤ（オムニ4輪それぞれの指令値） |
 | `roller` | ローラー（発射用。上下2段） |
-| `valve` | 電磁弁 |
+| `denziben` | 電磁弁（関数名。中の変数は `valve1` / `valve2`） |
 | `Lmayu1` / `Lmayu2` / `Rmayu1` / `Rmayu2` / `Ltuno1` / `Rtuno2` | プロポのスイッチ（L = 左、R = 右）。割り当ては [SBUS チャンネル割り当て](#sbus-チャンネル割り当て) |
 | `BAKETU1`〜`3` | 上ローラーの速度プリセット（1 = 長押し、2 = PS、3 = 旗） |
 | `SV` / `PV` / `MV` | 目標値 / 実際の値（エンコーダ）/ 操作量 |
@@ -46,7 +47,7 @@ STM32F767ZI をベースにした、4輪オムニ駆動ロボットの制御フ�
 5. 100ms 待ってから、Lidar 2台に測定開始コマンド（`5A 0A 02 02 00 F1`）を送り、循環 DMA で受信を始める
 6. メインループに入る
 
-電磁弁は起動時に LOCKOUT 状態から始まるので、撃つスイッチが ON のまま電源を入れても、一度 OFF にするまで開きません。
+撃つスイッチが ON のまま電源を入れても、一度 OFF にするまで電磁弁も装填の送りも動きません（[撃つスイッチの押し直し](#撃つスイッチの押し直しhassya)）。ただし装填の原点復帰は撃つスイッチに関係なく動くので、起動時に送りの端のスイッチ（lock6 / lock8）を踏んでいると、通信がつながった時点で原点へ戻り始めます。
 
 ## 制御ループ
 
@@ -63,23 +64,32 @@ if (20ms 経過) {
     souten_ramp();          // 装填モーターの PWM をランプで目標へ近づける
     printf(...);            // デバッグ出力（Lidar の距離）
 }
-souten();                   // 電磁弁と装填の指令（原点復帰とリミットでの即停止を含む）
-safety();                   // 異常時の停止と電磁弁の閉鎖、走行中のローラー制限、装填の上限、LED
+hassya();                   // 撃ってよいか（撃つスイッチの押し直し）を決める
+souten();                   // 装填モーターの指令（原点復帰とリミットでの即停止を含む）
+denziben();                 // 電磁弁の指令（最大 800ms）
+safety();                   // 異常時の停止と電磁弁の閉鎖、走行中のローラー制限、装填の上限
+led();                      // ステータス LED と LED テープ
 motor_outputs();            // PWM・DIR・電磁弁を出力
 ```
 
-**計算する関数（`asimawari` / `roller` / `souten` など）は変数（`pwmN`、`valveN_on`）に書くだけで、ピンに出すのは最後の `motor_outputs()` だけです。** そのため、出力の直前に呼ぶ `safety()` が、どのモードで計算された値にも必ず安全処理をかけられます。`safety()` より後で `pwm` を書き換えないでください。
+**計算する関数（`asimawari` / `roller` / `souten` / `denziben` など）は変数（`pwmN`、電磁弁の状態）に書くだけで、ピンに出すのは最後の `motor_outputs()` だけです。** そのため、出力の直前に呼ぶ `safety()` が、どのモードで計算された値にも必ず安全処理をかけられます。`safety()` より後で `pwm` を書き換えないでください。
 
 ## ファイル構成（`Core/Src` / `Core/Inc`）
 
 | ファイル | 中身 |
 |---|---|
-| `main.c` | 共有変数の定義、初期化、メインループ（CubeMX 生成） |
-| `function.c` / `.h` | 足回り（`asimawari`）、ローラー（`roller`）、装填と電磁弁（`souten` / `souten_ramp`）、Lidar PID（`auto_mode`）、リミットスイッチ（`limit_read`）、出力（`motor_outputs` / `outputs_all_off`） |
+| `main.c` | 共有変数の定義、初期化、メインループ、`printf` の出力先（`_write`）（CubeMX 生成） |
+| `function.h` | 共有変数（`pwm1` など）と、下の5ファイルの関数の宣言をまとめたヘッダ |
+| `asimawari.c` | 足回り（`asimawari`、`omni_mix`）と Lidar PID（`auto_mode`） |
+| `roller.c` | ローラー（`roller`） |
+| `hassya.c` | 発射（`hassya`）、電磁弁（`denziben`）、装填（`souten` / `souten_ramp`） |
+| `limit_sw.c` | リミットスイッチ・ボタンの読み取り（`limit_read`） |
+| `output.c` | PWM・DIR・電磁弁のピンへの出力（`motor_outputs`）と非常時の全停止（`outputs_all_off`） |
 | `motor_control.c` / `.h` | モーター1個分の制御（`motor_control`、`motor_simple_control`） |
 | `solenoid.c` / `.h` | 電磁弁1個分の ON 時間の制限（HAL を使わないので PC でもテストできる） |
 | `robot_limits.h` | 上限値・ランプ時間・タイムアウト時間の定数をまとめたヘッダ |
-| `safety.c` / `.h` | 安全機能（`safety`）、ステータス LED、LED テープ |
+| `safety.c` / `.h` | 安全機能（`safety`）と通信断の判定（`sbus_lost` / `can_lost`。判定は `safety()` で1周に1回） |
+| `led.c` / `.h` | ステータス LED、LED テープ、USER ボタンでの色の切り替え（`led`） |
 | `can_handler.c` / `.h` | CAN の送受信 |
 | `sbus_handler.c` / `.h` | SBUS の受信・デコードとスイッチ/スティックの変換 |
 | `lidar_sensor.c` / `.h` | Lidar のフレーム解析とタイムアウト判定 |
@@ -170,6 +180,8 @@ taiya[3] =  forward + strafe + turn;  // 右後 (pwm4)
 
 ## 発射と装填（`Rtuno2`）
 
+撃つかどうかは `Rtuno2` をもとに `hassya()` が決めます（押し直していないときは撃たない。次の節を参照）。
+
 | 条件 | 動作 |
 |---|---|
 | `Rtuno2 == 0` | 電磁弁を両方閉じ、装填モーターを止める |
@@ -191,9 +203,22 @@ taiya[3] =  forward + strafe + turn;  // 右後 (pwm4)
 
 起動直後の向きの値は 0 なので、装填2は最初の送りだけ、向きの切り替えに1周期（20ms）かかります。
 
+### 撃つスイッチの押し直し（`hassya`）
+
+撃つスイッチを押し直していないのに撃ってしまわないよう、`hassya()` が毎周回「今撃ってよいか」（`shoot`）を決めます。電磁弁（`denziben()`）も装填（`souten()`）も、`Rtuno2` ではなくこの `shoot` を見て動きます。
+
+- **撃てるようになる**: `Rtuno2` を一度離す（0 にする）。次に押したら撃てる
+- **撃てなくなる**（次に `Rtuno2` を離すまで撃たない）:
+  - 起動時（スイッチが ON のまま電源を入れても撃たない）
+  - 通信断（`safety()` が `hassya_off()` を呼ぶ。通信が戻っても、押しっぱなしでは撃たない。原点復帰の途中だった場合は、原点までは戻る）
+  - 電磁弁が 800ms の制限で閉じたとき（押したまま `Rmayu2` や `Lmayu2` を切り替えても開き直さない）
+  - `Rtuno2` を押したまま、撃つ相手を決めるスイッチ（`Lmayu1` / `Lmayu2` / `Rmayu2`）が変わったとき（押したままローラーを止めても電磁弁は開かない。押したまま上下のローラーを切り替えると送りが止まる）
+
+「押したまま」は、前の周回でも `Rtuno2` が ON だったことです。押し始めとスイッチの変更が同じ SBUS フレームで来た場合は、押し直しとみなして撃ちます。
+
 ### 電磁弁の ON 時間の制限
 
-12V 品を 18V 系統で駆動しているので、連続 ON を `SOLENOID_MAX_ON_MS`（800ms）までにしています（`solenoid.c`）。電磁弁ごとに次の3つの状態を持ちます（`valve1` / `valve2`）。
+12V 品を 18V 系統で駆動しているので、連続 ON を `SOLENOID_MAX_ON_MS`（800ms）までにしています。電磁弁の指令は `denziben()`（毎周回）が決め、時間の制限は `solenoid.c` が行います。電磁弁ごとに次の3つの状態を持ちます（`valve1` / `valve2`）。
 
 | 状態 | 弁 | 次の状態へ |
 |---|---|---|
@@ -201,9 +226,9 @@ taiya[3] =  forward + strafe + turn;  // 右後 (pwm4)
 | ON | 開 | 指令が消えたら OFF。800ms 経ったら指令によらず LOCKOUT |
 | LOCKOUT | 閉 | 指令が消える（スイッチを一度 OFF にする）まで開かない |
 
-- 撃つスイッチを押してから 800ms 経つと、押したままでも閉じます。押しっぱなしで開き直すこともありません。
-- 起動時と通信断の後も LOCKOUT から始まります。スイッチが ON のまま電源を入れたり通信が戻ったりしても、勝手に撃ちません。
-- 実際にピンに出す値は `valve1_on` / `valve2_on` で、`motor_outputs()` が書きます。
+- 撃つスイッチを押してから 800ms 経つと、押したままでも閉じます。閉じた後は撃つスイッチを一度離すまで、押したままほかのスイッチを切り替えても開きません。
+- 起動時と通信断の後も LOCKOUT から始まり、撃つスイッチを一度離すまで開きません。
+- 実際にピンに出す値は hassya.c の中だけで持っていて（ほかのファイルから書き換えて 800ms の制限を素通りしないように）、`motor_outputs()` は `denziben_on(1)` / `denziben_on(2)` で読んで出力します。
 
 ### 装填の原点復帰
 
@@ -222,7 +247,9 @@ taiya[3] =  forward + strafe + turn;  // 右後 (pwm4)
 
 ### 全停止
 
-次のどれかに当てはまると、pwm1〜pwm10 をすべて 0 にし、電磁弁を閉じます（`valves_off()`）。電磁弁は、異常が消えても撃つスイッチを一度 OFF にするまで開きません。モーターは、異常が消えると 0 からランプで動き直します。
+次のどれかに当てはまると、pwm1〜pwm10 をすべて 0 にし、電磁弁を閉じ、装填の送りの目標値も 0 にします（`hassya_off()`）。異常が消えても、撃つスイッチを一度 OFF にするまで電磁弁も装填の送りも動きません。足回りとローラーは、異常が消えると 0 からランプで動き直します。
+
+**装填の原点復帰だけは例外です。** 原点復帰の途中で通信が切れた場合、その間は止まりますが、通信が戻ると撃つスイッチに関係なく原点まで戻ります（ランプで動き出します）。
 
 | 異常 | 判定 |
 |---|---|
@@ -247,6 +274,10 @@ taiya[3] =  forward + strafe + turn;  // 右後 (pwm4)
 
 `HardFault_Handler` と `Error_Handler` は、止まる前に `outputs_all_off()` で全 PWM を 0 にし、電磁弁を閉じます。最後の出力のまま回り続けたり、電磁弁が開いたままになったりしないようにするためです。初期化の途中で呼ばれても安全なように、HAL のハンドルを使わずにレジスタへ直接書いています。
 
+## LED 表示（`led()`）
+
+`led()`（led.c）が毎周回、`safety()` の後に LED を光らせます。
+
 ### ステータス LED（基板の LD1〜LD3）
 
 | LED | 状態 |
@@ -259,7 +290,12 @@ taiya[3] =  forward + strafe + turn;  // 右後 (pwm4)
 
 ### LED テープ（lock3〜lock5）
 
-`TEAM_COLOR`（safety.c、0 = 赤 / 1 = 青）の色で光ります。試合前に自チームの色に合わせてください。
+チームの色（赤 / 青）で光ります。**色は基板の USER ボタン（Nucleo の青いボタン、PC13）を 1 秒長押しすると赤 ⇔ 青で切り替わります。** 試合前に自チームの色に合わせてください。
+
+- 起動時の色は `TEAM_COLOR`（led.c、今は 1 = 青）です。切り替えた色は保存しないので、電源を切ると起動時の色に戻ります。
+- 1秒未満の押しでは変わりません（うっかり触っても大丈夫）。長押しを続けても切り替わるのは1回だけで、もう一度切り替えるには一度離します。
+- 起動時にボタンを押していた場合は、一度離すまで反応しません。
+- SBUS 断・CAN 断の間はエラーの点滅が優先されて色が見えないので、ボタンを押しても無視します。エラーが消えても、一度離すまで反応しません。送信機を入れて通信が正常な状態で切り替えてください。
 
 | 状態 | 表示 |
 |---|---|
@@ -333,6 +369,7 @@ taiya[3] =  forward + strafe + turn;  // 右後 (pwm4)
 | `lock7` | PG14 | 入力（プルアップ） | 装填1 原点（押すと Low） |
 | `lock8` | PF15 | 入力（プルアップ） | 装填2 送りの端（押すと Low） |
 | `lock9` | PF11 | 入力（プルアップ） | 装填2 原点（押すと Low） |
+| `USER_Btn` | PC13 | 入力（押すと High） | LED テープの色の切り替え（Nucleo の USER ボタン、1秒長押し） |
 | `LD1` | PB0 | 出力 | ステータス LED 緑 |
 | `LD2` | PB7 | 出力 | ステータス LED 青 |
 | `LD3` | PB14 | 出力 | ステータス LED 赤 |
@@ -359,19 +396,24 @@ taiya[3] =  forward + strafe + turn;  // 右後 (pwm4)
 |---|---|---|
 | `motor_control(SV, PV, maxMV, down_pwm, max_pwm, *pwm, *dir, *rem)` | motor_control.c | エンコーダ付きの速度制御（ローラー用）。誤差の1/10を毎周期 PWM に足し込む積分制御で、1周期の変化量は `maxMV` までです。`rem` は整数除算の端数の繰り越しで、誤差が小さい領域の不感帯をなくします。方向転換と停止のときは `down_pwm` ずつ PWM を落とします。 |
 | `motor_simple_control(SV, step, max_pwm, *pwm, *dir)` | motor_control.c | エンコーダなしのランプ制御（足回り・装填用）。`SV` の符号が回転方向です（負 = dir 0 / 正 = dir 1）。PWM を `step` ずつ目標に近づけ、方向転換のときは一度 0 まで落としてから向きを変えます。 |
-| `asimawari()` | function.c | 走行モードに応じて前後・左右・旋回を決め、足回り4輪を動かします（20ms 周期）。 |
-| `omni_mix(forward, strafe, turn, taiya)` | function.c | オムニの混合式。全モード共通です。 |
-| `roller()` | function.c | `Lmayu2` / `Lmayu1` / `Ltuno1` / `ry` に応じてローラー4個の目標速度を決め、速度制御します（20ms 周期）。 |
-| `souten()` | function.c | 電磁弁と装填モーターの指令を決めます（毎周回）。リミットスイッチによる原点復帰と、リミットを踏んだ瞬間の即停止もここで行います。 |
-| `souten_ramp()` | function.c | 装填モーターの PWM を、`souten()` が決めた目標値へ `motor_simple_control` で近づけます（20ms 周期）。 |
-| `valves_off()` | function.c | 電磁弁をすぐ閉じ、撃つスイッチが一度 OFF になるまで開かないようにします。`safety()` が異常時に呼びます。 |
-| `motor_outputs()` | function.c | PWM・DIR・電磁弁をまとめて出力します。`safety()` の後に呼びます。 |
-| `outputs_all_off()` | function.c | 全 PWM と電磁弁をレジスタ直書きで即 0 にします。`HardFault_Handler` と `Error_Handler` から呼びます。 |
-| `limit_read(sw)` | function.c | リミットスイッチを読みます。20ms 同じ値が続いたときだけ確定値を更新します。 |
-| `auto_mode(d1, d2, reset, target)` | function.c | 2つの Lidar 距離から、距離を保つ PID（`auto_ly`）と平行を保つ PID（`auto_rx`）を計算します。`reset=1` で積分値をリセットします。 |
+| `asimawari()` | asimawari.c | 走行モードに応じて前後・左右・旋回を決め、足回り4輪を動かします（20ms 周期）。 |
+| `omni_mix(forward, strafe, turn, taiya)` | asimawari.c | オムニの混合式。全モード共通です。 |
+| `roller()` | roller.c | `Lmayu2` / `Lmayu1` / `Ltuno1` / `ry` に応じてローラー4個の目標速度を決め、速度制御します（20ms 周期）。 |
+| `hassya()` | hassya.c | 撃ってよいか（`shoot`）を決めます（毎周回、`souten()` と `denziben()` の前）。撃つスイッチを押し直していないときは撃ちません。 |
+| `hassya_off()` | hassya.c | 撃つのをすぐ全部止めます（電磁弁を閉じる、装填の送りの目標値を 0 にする、撃つスイッチを一度離すまで撃たない）。`safety()` が通信断のときに呼びます。原点復帰は止めません。 |
+| `souten()` | hassya.c | 装填モーターの指令を決めます（毎周回）。リミットスイッチによる原点復帰と、リミットを踏んだ瞬間の即停止もここで行います。 |
+| `souten_ramp()` | hassya.c | 装填モーターの PWM を、`souten()` が決めた目標値へ `motor_simple_control` で近づけます（20ms 周期）。 |
+| `denziben()` | hassya.c | 電磁弁の指令を決めます（毎周回）。ローラー停止中に撃つとき、`Rmayu2` で選んだ方を最大 800ms 開きます。 |
+| `denziben_on(n)` | hassya.c | 電磁弁 n（1 = lock1 / 2 = lock2）を開くなら 1 を返します。`motor_outputs()` が読みます。 |
+| `motor_outputs()` | output.c | PWM・DIR・電磁弁をまとめて出力します。`safety()` の後に呼びます。 |
+| `outputs_all_off()` | output.c | 全 PWM と電磁弁をレジスタ直書きで即 0 にします。`HardFault_Handler` と `Error_Handler` から呼びます。 |
+| `limit_read(sw)` | limit_sw.c | リミットスイッチを読みます。20ms 同じ値が続いたときだけ確定値を更新します。 |
+| `auto_mode(d1, d2, reset, target)` | asimawari.c | 2つの Lidar 距離から、距離を保つ PID（`auto_ly`）と平行を保つ PID（`auto_rx`）を計算します。`reset=1` で積分値をリセットします。 |
 | `solenoid_update(s, command, now)` | solenoid.c | 電磁弁1個分の状態（OFF / ON / LOCKOUT）を進め、開くなら 1 を返します。 |
 | `solenoid_lockout(s)` | solenoid.c | 電磁弁1個分をすぐ LOCKOUT にします。 |
-| `safety()` | safety.c | 異常時の全停止と電磁弁の閉鎖、走行中のローラー制限、装填の上限、LED 表示。 |
+| `safety()` | safety.c | 異常時の全停止と電磁弁の閉鎖、走行中のローラー制限、装填の上限。 |
+| `sbus_lost()` / `can_lost()` | safety.c | SBUS 断 / CAN 断なら 1 を返します。判定し直さず、`safety()` がこの周回で判定した結果を返すので、`led()` の表示と止めた状態が食い違いません。 |
+| `led()` | led.c | ステータス LED と LED テープを光らせ、USER ボタンの長押しでチームの色を切り替えます（毎周回、`safety()` の後）。 |
 | `HAL_CAN_RxFifo0MsgPendingCallback` | can_handler.c | CAN 受信割り込み。ID `0x001`、DLC 8以上のフレームを `use_data[]` に格納します。 |
 | `CAN_TX(id)` | can_handler.c | CAN 送信。現在はどこからも呼ばれていません。 |
 | `sbus()` | sbus_handler.c | スイッチとスティックを読みます。 |
@@ -404,14 +446,15 @@ taiya[3] =  forward + strafe + turn;  // 右後 (pwm4)
 | 定数 | 場所 | 値 | 内容 |
 |---|---|---|---|
 | `maxpwm` | main.c | 600 | 足回りの PWM 上限（duty 60%） |
-| `DRIVE_STEP` | function.c | 40 | 足回りの PWM を1周期に変える量 |
-| `ROLLER_SPEED` | function.c | 245 | 下ローラーの目標速度 |
-| `BAKETU1〜3_ROLLER_SPEED` | function.c | 150 / 84 / 76 | 上ローラーの目標速度 |
-| `BAKETU1_RY_RANGE` | function.c | 50 | BAKETU1 を `ry` で上げ下げできる幅。基準＋幅は 254 以下にすること |
-| `ROLLER_READY_TOLERANCE` | function.c | 5 | 目標速度との差がこれ以内なら「到達」とみなす |
-| `LIMIT_DEBOUNCE_MS` | function.c | 20 | リミットスイッチのノイズ除去時間 (ms) |
-| PID ゲイン | function.c `auto_mode()` | 距離 1.3 / 0.008 / 0.05、角度 0.6 / 0.01 / 0.2 | Kp / Ki / Kd |
-| `TEAM_COLOR` | safety.c | 1 | LED テープの色（0 = 赤 / 1 = 青）。試合前に合わせる |
+| `DRIVE_STEP` | asimawari.c | 40 | 足回りの PWM を1周期に変える量 |
+| `ROLLER_SPEED` | roller.c | 245 | 下ローラーの目標速度 |
+| `BAKETU1〜3_ROLLER_SPEED` | roller.c | 150 / 84 / 76 | 上ローラーの目標速度 |
+| `BAKETU1_RY_RANGE` | roller.c | 50 | BAKETU1 を `ry` で上げ下げできる幅。基準＋幅は 254 以下にすること |
+| `ROLLER_READY_TOLERANCE` | roller.c | 5 | 目標速度との差がこれ以内なら「到達」とみなす |
+| `LIMIT_DEBOUNCE_MS` | limit_sw.c | 20 | リミットスイッチのノイズ除去時間 (ms) |
+| PID ゲイン | asimawari.c `auto_mode()` | 距離 1.3 / 0.008 / 0.05、角度 0.6 / 0.01 / 0.2 | Kp / Ki / Kd |
+| `TEAM_COLOR` | led.c | 1 | 起動時の LED テープの色（0 = 赤 / 1 = 青）。USER ボタンで切り替えられる |
+| `TEAM_COLOR_HOLD_MS` | led.c | 1000 | USER ボタンを何 ms 押し続けたら色を切り替えるか |
 | `AUTO_TARGET_DIST_MM` | lidar_sensor.h | 1770 | 全自動モードで保つ壁からの距離 (mm) |
 | `LIDAR_OFFSET4` / `LIDAR_OFFSET7` | lidar_sensor.h | 0 / 0 | Lidar の取り付け位置の補正 (mm) |
 | `LIDAR_TIMEOUT_MS` | lidar_sensor.h | 100 | Lidar 途絶と判定するまでの時間 (ms) |

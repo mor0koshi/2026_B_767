@@ -29,6 +29,7 @@
 #include "sbus_handler.h"
 #include "lidar_sensor.h"
 #include "robot_limits.h"
+#include "led.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -214,6 +215,13 @@ static void MX_UART8_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+// printf の出力先を USART3 にする
+int _write(int file, char *ptr, int len) {
+    HAL_UART_Transmit(&huart3, (uint8_t *)ptr, len, 10);
+    return len;
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -323,11 +331,14 @@ int main(void)
             time1 = now;
         }
 
-        souten(); // 電磁弁と装填の指令 (毎周回。リミットスイッチを踏んだときの即停止もここ)
+        hassya();   // 撃ってよいか (撃つスイッチの押し直し) を決める
+        souten();   // 装填モーターの指令 (毎周回。リミットスイッチを踏んだときの即停止もここ)
+        denziben(); // 電磁弁の指令 (毎周回)
 
         // 必ず PWM を出力する直前に呼ぶこと。これより後で pwm を書き換えると
         // 異常時の停止やローラーの頭打ちが効かなくなる。
         safety();
+        led(); // ステータス LED と LED テープ (safety() の後)
 
         motor_outputs();
 

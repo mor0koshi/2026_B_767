@@ -113,7 +113,7 @@ int process_stick(int ch_value) {
     return mapped;
 }
 
-// スイッチとスティックを読む。足回りへの混合は asimawari() (function.c) で行う
+// スイッチとスティックを読む。足回りへの混合は asimawari() (asimawari.c) で行う
 void sbus(void){
     Lmayu1 = get_switch_state2(SBUS_CH[4]);
     Lmayu2 = get_switch_state2(SBUS_CH[5]);
