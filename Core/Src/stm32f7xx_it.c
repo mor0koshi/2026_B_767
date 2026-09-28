@@ -22,6 +22,7 @@
 #include "stm32f7xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "function.h" /* outputs_all_off() */
 #include <stdio.h>
 /* USER CODE END Includes */
 
@@ -93,7 +94,8 @@ void NMI_Handler(void)
 void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
-
+  // 止まる前に全モーターと電磁弁を止める (電磁弁は 12V 品を 18V 系統で駆動しているので開きっぱなしは不可)
+  outputs_all_off();
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
   {

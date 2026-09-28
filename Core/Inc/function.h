@@ -34,22 +34,12 @@ extern int pwm9;
 extern int pwm10;
 extern int pwm11;
 extern int pwm12;
-/* rem1〜rem4, rem9〜rem12 は main.c に実体が無い (未使用) */
-extern int rem1;
-extern int rem2;
-extern int rem3;
-extern int rem4;
+/* ローラーの motor_control 用。誤差を 1/10 するときの端数の繰り越し */
 extern int rem5;
 extern int rem6;
 extern int rem7;
 extern int rem8;
-extern int rem9;
-extern int rem10;
-extern int rem11;
-extern int rem12;
 
-
-extern int timer_flag; /* main.c に実体が無い (未使用) */
 extern int reset_flag1;
 extern int reset_flag2;
 
@@ -59,8 +49,8 @@ extern int dir3;
 extern int dir4;
 extern int maxpwm;
 
-extern int roller_dir1;
-extern int roller_dir2;
+extern int souten_dir1;
+extern int souten_dir2;
 extern int dummy;
 
 extern int auto_ly;
@@ -76,13 +66,16 @@ int _write(int file, char *ptr, int len);
 
 /*
  * メインループから呼ぶ順番
- *   asimawari() → roller() → loader() → safety() (safety.h) → motor_outputs()
- * CAN は can_handler.h、モーター 1 個分の制御は motor_control.h
+ *   asimawari() → roller() → souten_ramp() → souten() → safety() (safety.h) → motor_outputs()
+ * CAN は can_handler.h、モーター 1 個分の制御は motor_control.h、上限値などの定数は robot_limits.h
  */
-void asimawari(void);     /* 足回り (20ms 周期) */
-void roller(void);        /* ローラー (20ms 周期) */
-void loader(void);        /* 電磁弁と装填 (毎周回) */
-void motor_outputs(void); /* PWM と DIR の出力。safety() の後に呼ぶ */
+void asimawari(void);       /* 足回り (20ms 周期) */
+void roller(void);          /* ローラー (20ms 周期) */
+void souten_ramp(void);     /* 装填モーターの pwm をランプで目標へ近づける (20ms 周期) */
+void souten(void);          /* 電磁弁と装填の指令 (毎周回) */
+void valves_off(void);      /* 電磁弁をすぐ閉じ、撃つスイッチが一度 OFF になるまで開かない。safety() が呼ぶ */
+void motor_outputs(void);   /* PWM と DIR と電磁弁の出力。safety() の後に呼ぶ */
+void outputs_all_off(void); /* 全 PWM と電磁弁を即 0。HardFault / Error_Handler から呼ぶ */
 
 void auto_mode(int distance1, int distance2, int reset_flag, int target_dist);
 /*

@@ -20,8 +20,8 @@ extern "C" {
  * (半自動モードは目標距離に現在距離を渡すので、半自動→全自動の切替では D 項が
  *  1 周期跳ねる。足回りは 1 周期 80 ずつしか変化しないので実害は小さい)
  */
-#define LIDAR_OFFSET4 11
-#define LIDAR_OFFSET7 38
+#define LIDAR_OFFSET4 0
+#define LIDAR_OFFSET7 0
 
 /* 全自動モードで壁から保つ目標距離(mm) */
 #define AUTO_TARGET_DIST_MM 1770

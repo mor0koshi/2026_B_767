@@ -51,6 +51,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/can_handler.c
     Core/Src/sbus_handler.c
     Core/Src/lidar_sensor.c
+    Core/Src/solenoid.c
 )
 
 # Add include paths

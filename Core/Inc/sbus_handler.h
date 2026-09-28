@@ -7,13 +7,8 @@ extern "C" {
 
 #include "main.h"
 #include "sbus.h"
+#include "robot_limits.h" /* SBUS_TIMEOUT_MS */
 #include <stdint.h>
-
-/*
- * 最後にSBUSフレームをデコードできた時刻から何ms経ったら受信断とみなすか。
- * SBUSは14ms(ハイスピードなら7ms)周期なので、100msは約7フレーム分の猶予。
- */
-#define SBUS_TIMEOUT_MS 100
 
 /* ペリフェラルハンドル (main.c で定義) */
 extern UART_HandleTypeDef huart5;

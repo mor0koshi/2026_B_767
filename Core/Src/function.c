@@ -9,6 +9,8 @@
 #include "function.h"
 #include "lidar_sensor.h"  /* asimawari() で Lidar の距離と lidar_timeout() を使うため */
 #include "motor_control.h" /* motor_control(), motor_simple_control() */
+#include "robot_limits.h"  /* 上限値・ランプ・タイムアウトの定数 */
+#include "solenoid.h"      /* 電磁弁の ON 時間の制限 */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,7 +26,7 @@ int _write(int file, char *ptr, int len) {
  * ========================================================================== */
 
 // 足回りの PWM を 20ms あたり何ずつ目標値に近づけるか
-static const int DRIVE_STEP = 80;
+static const int DRIVE_STEP = 40;
 
 /*
  * 前後・左右・旋回の指令から、オムニ 4 輪それぞれの指令値を計算する。
@@ -59,7 +61,7 @@ void asimawari(void) {
         auto_mode(d4, d7, 1, AUTO_TARGET_DIST_MM);
         omni_mix(ly, lx, -rx, taiya);
         for (int i = 0; i < 4; i++) {
-            taiya[i] = taiya[i] * 9 / 10; // 1 軸を倒しきったとき、ちょうど maxpwm (900) になる
+            taiya[i] = taiya[i] * 5 / 10; // 1 軸を倒しきったとき、ちょうど maxpwm (900) になる
         }
     } else if (Rmayu1 == 0) {
         // 半自動モード。目標距離に現在距離を渡して距離の誤差を 0 にし、旋回の PID だけ効かせる
@@ -83,25 +85,23 @@ void asimawari(void) {
 
 // ローラーの目標速度。エンコーダ値 (PV) と同じ 0〜255 系で、TIM1 の Period 254 以下にすること
 static const int ROLLER_SPEED = 245;         // 下ローラー
-static const int BAKETU1_ROLLER_SPEED = 100; // 上ローラー Ltuno1 == -1
-static const int BAKETU2_ROLLER_SPEED = 150; // 上ローラー Ltuno1 == 0
-static const int BAKETU3_ROLLER_SPEED = 200; // 上ローラー Ltuno1 == 1
+static const int BAKETU1_ROLLER_SPEED = 150; // 上ローラー Ltuno1 == -1　長押し
+static const int BAKETU2_ROLLER_SPEED = 84; // 上ローラー Ltuno1 == 0　PS
+static const int BAKETU3_ROLLER_SPEED = 76; // 上ローラー Ltuno1 == 1　旗
 static const int ROLLER_STOP = 0;
 
+// BAKETU1 は RY スティックで上げ下げできる。倒しきったときに BAKETU1_ROLLER_SPEED から変える量。
+// BAKETU1_ROLLER_SPEED + BAKETU1_RY_RANGE も 254 以下にすること
+static const int BAKETU1_RY_RANGE = 50;
+
 // 目標速度との差がこれ以内なら「目標速度に達した」とみなす (PV と同じ 0〜255 系)
-static const int ROLLER_READY_TOLERANCE = 10;
+static const int ROLLER_READY_TOLERANCE = 5;
 
 // 回しているローラーが目標速度に達していれば 1。roller() が立て、safety() の color() が LED を点滅させる
 int roller_ready = 0;
 
-// 未使用
-uint32_t time3 = 0;
-uint32_t time4 = 0;
-uint32_t time5 = 0;
-int set_flag1 = 0;
-int set_flag2 = 0;
-
-// 上ローラーの目標速度を Ltuno1 で選ぶ
+// 上ローラーの目標速度を Ltuno1 で選ぶ。
+// BAKETU1 だけは RY の位置 (±1000) に比例して ±BAKETU1_RY_RANGE 変える (中央で BAKETU1_ROLLER_SPEED)
 static int upper_roller_speed(void) {
     switch (Ltuno1) {
     case 1:
@@ -109,14 +109,14 @@ static int upper_roller_speed(void) {
     case 0:
         return BAKETU2_ROLLER_SPEED;
     case -1:
-        return BAKETU1_ROLLER_SPEED;
+        return BAKETU1_ROLLER_SPEED + ry * BAKETU1_RY_RANGE / 1000;
     }
     return ROLLER_STOP; // Ltuno1 は -1/0/1 しか取らないので、ここには来ない
 }
 
-// ローラー 1 個分の速度制御。4 個とも同じ制御パラメータを使う
+// ローラー 1 個分の速度制御。4 個とも同じ制御パラメータ (robot_limits.h) を使う
 static void roller_motor(int speed, int PV, int *pwm, int *rem) {
-    motor_control(speed, PV, 5, 20, 250, pwm, &dummy, rem);
+    motor_control(speed, PV, ROLLER_STEP_UP, ROLLER_STEP_DOWN, ROLLER_PWM_MAX, pwm, &dummy, rem);
 }
 
 // 目標速度 speed に PV が達していれば 1。止めているローラー (speed == 0) は常に 0
@@ -153,8 +153,18 @@ void roller(void) {
  * 電磁弁と装填
  * ========================================================================== */
 
-// 装填モーターの PWM (TIM3 の Period 999 に対して 60%)。送りも原点復帰も同じ値
-static const int LOADER_PWM = 600;
+// 装填モーター (RS-555) の目標値。符号が向き (負 = dir 0 / 正 = dir 1) で、motor_simple_control の SV と同じ。
+// souten() が毎周回決め、souten_ramp() が 20ms ごとに pwm9 / pwm10 をこの値へ近づける
+static int souten1_target = 0;
+static int souten2_target = 0;
+
+// 電磁弁の ON 時間の制限 (solenoid.h)。起動時は LOCKOUT から始める
+static solenoid valve1 = SOLENOID_INIT; // lock1
+static solenoid valve2 = SOLENOID_INIT; // lock2
+
+// 電磁弁を開くなら 1。souten() が決め、safety() が非常時に 0 にし、motor_outputs() が出力する
+static uint8_t valve1_on = 0;
+static uint8_t valve2_on = 0;
 
 // 逆転リセットのリミットスイッチ。ノイズ除去して読む (limit_read)
 static limit_sw sw_lock6 = LIMIT_SW_INIT(lock6_GPIO_Port, lock6_Pin); // 装填1 リセット開始
@@ -165,10 +175,16 @@ static limit_sw sw_lock9 = LIMIT_SW_INIT(lock9_GPIO_Port, lock9_Pin); // 装填2
 /*
  * 原点復帰フラグを更新する。
  * lock6/lock8 で立ち、原点の lock7/lock9 で下りる (両方踏んでいれば原点側が勝つ)。
- * 原点リミットは「復帰の終了」だけを担当させる。原点で pwm を直接 0 にすると、
- * 原点で静止している間は通常の正転指令まで毎周回打ち消されてしまう。
+ *
+ * フラグが切り替わった瞬間 (送りの端 lock6/lock8 か、原点 lock7/lock9 を踏んだとき) は、
+ * 機構を端に押し付けないよう、ランプを待たずに pwm を 0 にする。その後の反転・再始動はランプで行う。
+ * 「切り替わった瞬間」だけにするのは、原点で静止している間に毎周回 0 にすると、
+ * 次の正転指令まで打ち消されてしまうため。
  */
 static void update_homing(void) {
+    int was_homing1 = reset_flag1;
+    int was_homing2 = reset_flag2;
+
     if (limit_read(&sw_lock6) == 0) {
         reset_flag1 = 1;
     }
@@ -181,21 +197,33 @@ static void update_homing(void) {
     if (limit_read(&sw_lock9) == 0) {
         reset_flag2 = 0;
     }
+
+    if (reset_flag1 != was_homing1) {
+        pwm9 = 0;
+    }
+    if (reset_flag2 != was_homing2) {
+        pwm10 = 0;
+    }
 }
 
+// dir の向きに SOUTEN_PWM_MAX で回すときの装填の目標値
+static int souten_target(int dir) {
+    return dir ? SOUTEN_PWM_MAX : -SOUTEN_PWM_MAX;
+}
 
 /*
- * 電磁弁と装填モーターを動かす。毎周回呼ぶ。
+ * 電磁弁と装填モーターの指令を決める。毎周回呼ぶ。
+ * 装填モーターの pwm は souten_ramp() が、電磁弁の出力は motor_outputs() が書く。
  *
  *   Rtuno2 (撃つ)  ローラー   動作
  *   0              -          電磁弁も装填も止める
- *   1              停止中     Rmayu2 で選んだ電磁弁を開く (0=lock1 / 1=lock2)
+ *   1              停止中     Rmayu2 で選んだ電磁弁を開く (0=lock1 / 1=lock2)。SOLENOID_MAX_ON_MS で閉じる
  *   1              下が回転   装填1 (pwm9) を正転
  *   1              上が回転   装填2 (pwm10) を正転
  *
  * 原点復帰中は、上の結果によらず装填モーターを逆転させる。
  */
-void loader(void) {
+void souten(void) {
     int shoot = (Rtuno2 == 1);
     int roller_on = (Lmayu2 == 1);
 
@@ -203,39 +231,50 @@ void loader(void) {
 
     // 電磁弁: ローラー停止中に撃つときだけ使う
     int use_solenoid = shoot && !roller_on;
-    if (use_solenoid && Rmayu2 == 0) {
-        HAL_GPIO_WritePin(lock1_GPIO_Port, lock1_Pin, 1);
-    } else {
-        HAL_GPIO_WritePin(lock1_GPIO_Port, lock1_Pin, 0);
-    }
-    if (use_solenoid && Rmayu2 == 1) {
-        HAL_GPIO_WritePin(lock2_GPIO_Port, lock2_Pin, 1);
-    } else {
-        HAL_GPIO_WritePin(lock2_GPIO_Port, lock2_Pin, 0);
-    }
+    uint32_t t = HAL_GetTick();
+    valve1_on = solenoid_update(&valve1, use_solenoid && Rmayu2 == 0, t);
+    valve2_on = solenoid_update(&valve2, use_solenoid && Rmayu2 == 1, t);
 
     // 装填: ローラー回転中に撃つとき、回っている方のローラーへ球を送る
     int feed = shoot && roller_on;
-    pwm9 = 0;
-    pwm10 = 0;
+    souten1_target = 0;
+    souten2_target = 0;
     if (feed && Lmayu1 == 0) { // 下ローラー → 装填1
-        pwm9 = LOADER_PWM;
-        roller_dir1 = 1;
+        souten1_target = souten_target(0);
     }
     if (feed && Lmayu1 == 1) { // 上ローラー → 装填2
-        pwm10 = LOADER_PWM;
-        roller_dir2 = 1;
+        souten2_target = souten_target(1);
     }
 
     // 原点復帰中は優先して逆転させる
     if (reset_flag1 == 1) {
-        pwm9 = LOADER_PWM;
-        roller_dir1 = 0;
+        souten1_target = souten_target(1);
     }
     if (reset_flag2 == 1) {
-        pwm10 = LOADER_PWM;
-        roller_dir2 = 0;
+        souten2_target = souten_target(0);
     }
+}
+
+/*
+ * 装填モーター (RS-555) の pwm を souten() の目標値へ近づける。20ms 周期で呼ぶこと。
+ * 12V 用のモーターを 18V 系統で回すので、上限は SOUTEN_PWM_MAX (12V/21V ≒ 57%)。
+ * 始動・停止は SOUTEN_RAMP_MS かけて変化させ、反転は一度 0 まで下げてから向きを変える。
+ * リミットを踏んだときだけは update_homing() が即 0 にする。
+ */
+void souten_ramp(void) {
+    motor_simple_control(souten1_target, SOUTEN_RAMP_STEP, SOUTEN_PWM_MAX, &pwm9, &souten_dir1);
+    motor_simple_control(souten2_target, SOUTEN_RAMP_STEP, SOUTEN_PWM_MAX, &pwm10, &souten_dir2);
+}
+
+/*
+ * 電磁弁を両方すぐ閉じ、撃つスイッチが一度 OFF になるまで開かないようにする。
+ * safety() が通信断のときに呼ぶ。通信が戻った瞬間にスイッチが ON のままでも開かない。
+ */
+void valves_off(void) {
+    solenoid_lockout(&valve1);
+    solenoid_lockout(&valve2);
+    valve1_on = 0;
+    valve2_on = 0;
 }
 
 /*
@@ -354,21 +393,50 @@ void motor_outputs(void) {
     // ローラーは常に一方向なので DIR は固定値。
     // 対になる 2 個は向かい合っているので、逆の値にして互いに逆回転させる。
     __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, pwm5); // 上ローラー = 基板ch7 (PWM7=PE11)
-    HAL_GPIO_WritePin(d7_GPIO_Port, d7_Pin, 0);         // DIR7 = PF12
+    HAL_GPIO_WritePin(d7_GPIO_Port, d7_Pin, 1);         // DIR7 = PF12
     __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pwm6); // 下ローラー = 基板ch8 (PWM8=PE9)
-    HAL_GPIO_WritePin(d8_GPIO_Port, d8_Pin, 0);         // DIR8 = PF13
+    HAL_GPIO_WritePin(d8_GPIO_Port, d8_Pin, 1);         // DIR8 = PF13
     __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3, pwm7); // 上ローラー = 基板ch5 (PWM5=PE13)
-    HAL_GPIO_WritePin(d5_GPIO_Port, d5_Pin, 1);         // DIR5 = PF3
+    HAL_GPIO_WritePin(d5_GPIO_Port, d5_Pin, 0);         // DIR5 = PF3
     __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_4, pwm8); // 下ローラー = 基板ch6 (PWM6=PE14)
-    HAL_GPIO_WritePin(d6_GPIO_Port, d6_Pin, 1);         // DIR6 = PF14
+    HAL_GPIO_WritePin(d6_GPIO_Port, d6_Pin, 0);         // DIR6 = PF14
 
-    // 装填は正転/逆転リセットがあるので DIR は roller_dir を出す
+    // 装填は正転/逆転リセットがあるので DIR は souten_dir を出す
     __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, pwm9);    // 装填1 = 基板ch10 (PWM10=PC7)
-    HAL_GPIO_WritePin(d10_GPIO_Port, d10_Pin, roller_dir1); // DIR10 = PA11
+    HAL_GPIO_WritePin(d10_GPIO_Port, d10_Pin, souten_dir1); // DIR10 = PA11
     __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, pwm10);   // 装填2 = 基板ch9 (PWM9=PC6)
-    HAL_GPIO_WritePin(d9_GPIO_Port, d9_Pin, roller_dir2);   // DIR9 = PA12
+    HAL_GPIO_WritePin(d9_GPIO_Port, d9_Pin, souten_dir2);   // DIR9 = PA12
+
+    // 電磁弁 (GPIO High で ON)
+    HAL_GPIO_WritePin(lock1_GPIO_Port, lock1_Pin, valve1_on); // lock1 = PG4
+    HAL_GPIO_WritePin(lock2_GPIO_Port, lock2_Pin, valve2_on); // lock2 = PG6
 
     // 予備 (未使用)
     // __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, pwm11); // 基板ch11 (PWM11=PC8), DIR11 = PB12
     // __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, pwm12); // 基板ch12 (PWM12=PC9), DIR12 = PB11
+}
+
+/*
+ * 全モーターと電磁弁を即座に止める。HardFault_Handler と Error_Handler から呼ぶ。
+ * マイコンが止まっても、最後の PWM で回り続けたり、電磁弁 (12V 品を 18V 系統で駆動) が
+ * 開きっぱなしになったりしないようにする。
+ * 初期化の途中で呼ばれても安全なように、HAL のハンドル (Instance が未設定かもしれない) を
+ * 使わずにレジスタへ直接書く。
+ */
+void outputs_all_off(void) {
+    HAL_GPIO_WritePin(lock1_GPIO_Port, lock1_Pin, 0);
+    HAL_GPIO_WritePin(lock2_GPIO_Port, lock2_Pin, 0);
+
+    TIM1->CCR1 = 0; // ローラー
+    TIM1->CCR2 = 0;
+    TIM1->CCR3 = 0;
+    TIM1->CCR4 = 0;
+    TIM3->CCR1 = 0; // 装填・予備
+    TIM3->CCR2 = 0;
+    TIM3->CCR3 = 0;
+    TIM3->CCR4 = 0;
+    TIM4->CCR1 = 0; // 足回り
+    TIM4->CCR2 = 0;
+    TIM4->CCR3 = 0;
+    TIM4->CCR4 = 0;
 }

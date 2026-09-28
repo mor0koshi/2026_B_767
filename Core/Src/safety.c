@@ -11,15 +11,13 @@
 #include "function.h"      /* pwm1〜pwm10, now */
 #include "lidar_sensor.h"  /* lidar_timeout() */
 #include "sbus_handler.h"  /* SBUS_CH, SBUS_Failsafe, SBUS_LostFrame, last_sbus_rx */
-
-// 走行中のローラーの PWM 上限 (TIM1 の Period 254 に対して約 40%)
-static const int ROLLER_PWM_WHILE_DRIVING = 100;
+#include "robot_limits.h"  /* ROLLER_PWM_WHILE_DRIVING, SOUTEN_PWM_MAX, CAN_TIMEOUT_MS */
 
 // color() に渡す自チームの色 (0 = 赤 / 1 = 青)。試合前に合わせること
-static const int TEAM_COLOR = 0;
+static const int TEAM_COLOR = 1;
 
 /*
- * SBUS が使えない状態なら 1 を返す。次の 4 つのどれかで判定する。
+ * SBUS が使えない状態なら 1 を返す。次の 1, 2, 4 のどれかで判定する (3 は使わない)。
  *   1. last_sbus_rx のタイムアウト … 受信が完全に途絶えた場合。
  *      SBUS_CH も SBUS_LostFrame もフレームが来たときしか更新されないため、
  *      コネクタが抜けると古い値のまま固まる。これが無いと直前のスティック
@@ -27,7 +25,7 @@ static const int TEAM_COLOR = 0;
  *   2. SBUS_Failsafe … 「受信機が送信機を見失った」決定的な信号。
  *      送信機の電源を切っても受信機は正常なフレームを送り続け、このビット
  *      だけを立てるので、1 でも 3 でも捕まえられない。
- *   3. SBUS_LostFrame … 単発のフレーム落ち。
+ *   3. SBUS_LostFrame … 単発のフレーム落ち。ノイズで急停止するので判定に使わない。
  *   4. SBUS_CH[0] == 0 … 起動直後(まだ1フレームも来ていない)の保険。
  *      HAL_GetTick() がまだ SBUS_TIMEOUT_MS に満たない間は 1 が効かないため。
  */
@@ -36,9 +34,9 @@ static int sbus_lost(void) {
            SBUS_CH[0] == 0;
 }
 
-// CAN が 100ms 以上届いていなければ 1 を返す
-sta|| SBUS_LostFrame tic int can_lost(void) {
-    return HAL_GetTick() - last_can_rx > 100;
+// CAN が CAN_TIMEOUT_MS 以上届いていなければ 1 を返す
+int can_lost(void) {
+    return HAL_GetTick() - last_can_rx > CAN_TIMEOUT_MS;
 }
 
 
@@ -102,8 +100,9 @@ static void update_status_led(int sbus_error, int can_error) {
 
 /*
  * 安全機能。必ず PWM を出力する直前に呼ぶこと。
- *   ・SBUS か CAN が使えなければ全モーターを止める
+ *   ・SBUS か CAN が使えなければ全モーターを止め、電磁弁を閉じる
  *   ・足回りが回っている間はローラーの PWM を頭打ちにする
+ *   ・装填 (12V 用の RS-555) の PWM を SOUTEN_PWM_MAX で頭打ちにする
  *   ・状態を LED に出す
  */
 void safety(void) {
@@ -122,6 +121,9 @@ void safety(void) {
         pwm9 = 0;
         pwm10 = 0;
 
+        // 電磁弁も閉じる。通信が戻っても、撃つスイッチを一度 OFF にするまで開かない
+        valves_off();
+
         // CAN 断だとエンコーダ値 (PV) が古いまま固まり、roller() が「到達」と誤判定しうる。
         // モーターを止めている間は発射準備完了ではないので、フラグを下ろしておく
         roller_ready = 0;
@@ -137,6 +139,10 @@ void safety(void) {
         limit_pwm(&pwm6, ROLLER_PWM_WHILE_DRIVING);
         limit_pwm(&pwm8, ROLLER_PWM_WHILE_DRIVING);
     }
+
+    // RS-555 は 12V 用なので、どこで pwm を書き換えても 12V 相当を超えさせない
+    limit_pwm(&pwm9, SOUTEN_PWM_MAX);
+    limit_pwm(&pwm10, SOUTEN_PWM_MAX);
 
     update_status_led(sbus_error, can_error);
     color(TEAM_COLOR, sbus_error, can_error);

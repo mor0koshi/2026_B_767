@@ -28,6 +28,7 @@
 #include "safety.h"
 #include "sbus_handler.h"
 #include "lidar_sensor.h"
+#include "robot_limits.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -93,7 +94,7 @@ DMA_HandleTypeDef hdma_uart8_rx;
 // スティック (sbus() で ±1000 に変換済み)
 int rx; // 旋回 (CH0)
 int ly; // 前後 (CH1)
-int ry; // 未使用 (CH2)
+int ry; // BAKETU1 の速度調整 (CH2)。Ltuno1 == -1 のとき上ローラーの目標速度を ±BAKETU1_RY_RANGE 変える
 int lx; // 左右 (CH3)
 
 // スイッチ (sbus() で変換済み)
@@ -101,7 +102,7 @@ int Lmayu1; // CH4 ローラー選択    1=上ローラー / 0=下ローラー
 int Lmayu2; // CH5 ローラー回転    1=回す / 0=止める
 int Rmayu1; // CH6 走行モード      -1=手動 / 0=半自動 / 1=全自動
 int Rmayu2; // CH7 電磁弁の選択    0=lock1 / 1=lock2
-int Ltuno1; // CH8 上ローラー速度  1=200 / 0=150 / -1=100
+int Ltuno1; // CH8 上ローラー速度  1=BAKETU3 / 0=BAKETU2 / -1=BAKETU1 (RY で調整)
 int Rtuno2; // CH9 発射            1=打つ / 0=打たない
 
 // CAN (ID 0x001) で受け取るローラーのエンコーダ値。0〜255
@@ -121,8 +122,8 @@ int dir4 = 0;
 /*
  * 各モーターの PWM 値。タイマーごとに Period が違うので値の範囲も違う。
  *   pwm1〜pwm4  足回り   TIM4 (Period 999) … 上限 maxpwm
- *   pwm5〜pwm8  ローラー TIM1 (Period 254) … 上限 250
- *   pwm9, pwm10 装填     TIM3 (Period 999) … 600 固定
+ *   pwm5〜pwm8  ローラー TIM1 (Period 254) … 上限 ROLLER_PWM_MAX (robot_limits.h)
+ *   pwm9, pwm10 装填     TIM3 (Period 999) … 上限 SOUTEN_PWM_MAX (12V/21V ≒ 57% → 571)
  *   pwm11, pwm12 予備    TIM3 (未使用)
  * Period を超える値を入れると常に 100% デューティになるので注意。
  */
@@ -146,16 +147,14 @@ int rem6 = 0;
 int rem7 = 0;
 int rem8 = 0;
 
-int maxpwm = 1000 * 0.9; // 足回りの PWM 上限 (TIM4 の Period 999 に対して 90%)
-
-int maxmv = 20; // 未使用
+int maxpwm = 1000 * 0.6; // 足回りの PWM 上限 (TIM4 の Period 999 に対して 90%)
 
 // 装填の原点復帰中フラグ。lock6/lock8 で立ち、原点の lock7/lock9 で下りる
 int reset_flag1 = 0; // 装填1
 int reset_flag2 = 0; // 装填2
 
-int roller_dir1 = 0; // 装填1(pwm9)の回転方向を保持する変数
-int roller_dir2 = 0; // 装填2(pwm10)の回転方向を保持する変数
+int souten_dir1 = 0; // 装填1(pwm9)の回転方向 (souten_ramp が更新)
+int souten_dir2 = 0; // 装填2(pwm10)の回転方向 (souten_ramp が更新)
 
 // ローラーは常に正転で方向転換しない (DIR は出力時に固定値を書く) ため、
 // motor_control の dir の受け皿は共用の捨て変数でよい
@@ -306,28 +305,32 @@ int main(void)
         // CAN で受け取ったローラーのエンコーダ値
         PV1 = use_data[0];
         PV2 = use_data[1];
-        PV3 = use_data[2];
+        PV5 = use_data[2];
         PV4 = use_data[3];
-        PV5 = use_data[4];
+        PV3 = use_data[4];
         PV6 = use_data[5];
 
         sbus();  // スイッチとスティックを読む
         lidar(); // Lidar の距離を更新
 
-        // 足回りとローラーは 20ms 周期 (auto_mode() の dt もこの周期が前提)
-        if (now - time1 >= 20) {
+        // 足回り・ローラー・装填のランプは 20ms 周期 (auto_mode() の dt もこの周期が前提)
+        if (now - time1 >= CONTROL_PERIOD_MS) {
             asimawari();
             roller();
+            souten_ramp();
+          //printf("PV1:%d PV2:%d PV3:%d PV4:%d pwm5:%d pwm7: %d pwm6:%d pwm8:%d\n",PV1,PV2,PV3,PV4,pwm5,pwm7,pwm6,pwm8);
+        printf("distance4 :%d distance7:%d\n",distance4,distance7);
             time1 = now;
         }
 
-        loader(); // 電磁弁と装填 (毎周回)
+        souten(); // 電磁弁と装填の指令 (毎周回。リミットスイッチを踏んだときの即停止もここ)
 
         // 必ず PWM を出力する直前に呼ぶこと。これより後で pwm を書き換えると
         // 異常時の停止やローラーの頭打ちが効かなくなる。
         safety();
 
         motor_outputs();
+
 
     /* USER CODE END WHILE */
 
@@ -1111,6 +1114,7 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
     /* User can add his own implementation to report the HAL error return state */
+    outputs_all_off(); // 止まる前に全モーターと電磁弁を止める
     __disable_irq();
     while (1) {
     }
