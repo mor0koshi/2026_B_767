@@ -127,12 +127,12 @@ void Error_Handler(void);
 #define m4_GPIO_Port GPIOD
 #define m3_Pin GPIO_PIN_15
 #define m3_GPIO_Port GPIOD
-#define lock1_Pin GPIO_PIN_4
+#define lock1_Pin GPIO_PIN_2
 #define lock1_GPIO_Port GPIOG
+#define lock2_Pin GPIO_PIN_3
+#define lock2_GPIO_Port GPIOG
 #define lock4_Pin GPIO_PIN_5
 #define lock4_GPIO_Port GPIOG
-#define lock2_Pin GPIO_PIN_6
-#define lock2_GPIO_Port GPIOG
 #define lock3_Pin GPIO_PIN_7
 #define lock3_GPIO_Port GPIOG
 #define lock6_Pin GPIO_PIN_8
@@ -159,6 +159,8 @@ void Error_Handler(void);
 #define TMS_GPIO_Port GPIOA
 #define TCK_Pin GPIO_PIN_14
 #define TCK_GPIO_Port GPIOA
+#define LOCK_Pin GPIO_PIN_2
+#define LOCK_GPIO_Port GPIOD
 #define RMII_TX_EN_Pin GPIO_PIN_11
 #define RMII_TX_EN_GPIO_Port GPIOG
 #define RMII_TXD0_Pin GPIO_PIN_13

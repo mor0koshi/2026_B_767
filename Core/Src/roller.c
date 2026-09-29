@@ -8,26 +8,15 @@
 /* USER CODE END Header */
 #include "function.h"
 #include "motor_control.h" /* motor_control() */
-#include "robot_limits.h"  /* ROLLER_PWM_MAX, ROLLER_STEP_UP, ROLLER_STEP_DOWN */
+#include "robot_limits.h"  /* ローラーの目標速度・PWM 上限・ステップ */
 #include <stdlib.h>        /* abs() */
 
 /* ============================================================================
  * ローラー
  * ========================================================================== */
 
-// ローラーの目標速度。エンコーダ値 (PV) と同じ 0〜255 系で、TIM1 の Period 254 以下にすること
-static const int ROLLER_SPEED = 245;         // 下ローラー
-static const int BAKETU1_ROLLER_SPEED = 150; // 上ローラー Ltuno1 == -1　長押し
-static const int BAKETU2_ROLLER_SPEED = 84; // 上ローラー Ltuno1 == 0　PS
-static const int BAKETU3_ROLLER_SPEED = 76; // 上ローラー Ltuno1 == 1　旗
+// 目標速度 (LOWER_ROLLER_SPEED、BAKETU1〜3_ROLLER_SPEED など) は robot_limits.h で変える
 static const int ROLLER_STOP = 0;
-
-// BAKETU1 は RY スティックで上げ下げできる。倒しきったときに BAKETU1_ROLLER_SPEED から変える量。
-// BAKETU1_ROLLER_SPEED + BAKETU1_RY_RANGE も 254 以下にすること
-static const int BAKETU1_RY_RANGE = 50;
-
-// 目標速度との差がこれ以内なら「目標速度に達した」とみなす (PV と同じ 0〜255 系)
-static const int ROLLER_READY_TOLERANCE = 5;
 
 // 回しているローラーが目標速度に達していれば 1。roller() が立て、led.c の color() が LED テープを点滅させる
 int roller_ready = 0;
@@ -69,7 +58,8 @@ static int roller_at_speed(int speed, int PV) {
 void roller(void) {
     int roller_on = (Lmayu2 == 1);
     int upper = (roller_on && Lmayu1 == 1) ? upper_roller_speed() : ROLLER_STOP;
-    int lower = (roller_on && Lmayu1 == 0) ? ROLLER_SPEED : ROLLER_STOP;
+    int lower = (roller_on && Lmayu1 == 0) ? LOWER_ROLLER_SPEED : ROLLER_STOP;
+    int lower = (roller_on && Lmayu1 == 0) ? LOWER_ROLLER_SPEED : ROLLER_STOP;
 
     roller_motor(upper, PV1, &pwm5, &rem5);
     roller_motor(upper, PV2, &pwm7, &rem7);

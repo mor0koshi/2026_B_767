@@ -101,7 +101,7 @@ int lx; // 左右 (CH3)
 // スイッチ (sbus() で変換済み)
 int Lmayu1; // CH4 ローラー選択    1=上ローラー / 0=下ローラー
 int Lmayu2; // CH5 ローラー回転    1=回す / 0=止める
-int Rmayu1; // CH6 走行モード      -1=手動 / 0=半自動 / 1=全自動
+int Rmayu1; // CH6 未使用
 int Rmayu2; // CH7 電磁弁の選択    0=lock1 / 1=lock2
 int Ltuno1; // CH8 上ローラー速度  1=BAKETU3 / 0=BAKETU2 / -1=BAKETU1 (RY で調整)
 int Rtuno2; // CH9 発射            1=打つ / 0=打たない
@@ -122,7 +122,7 @@ int dir4 = 0;
 
 /*
  * 各モーターの PWM 値。タイマーごとに Period が違うので値の範囲も違う。
- *   pwm1〜pwm4  足回り   TIM4 (Period 999) … 上限 maxpwm
+ *   pwm1〜pwm4  足回り   TIM4 (Period 999) … 上限 DRIVE_PWM_MAX (robot_limits.h)
  *   pwm5〜pwm8  ローラー TIM1 (Period 254) … 上限 ROLLER_PWM_MAX (robot_limits.h)
  *   pwm9, pwm10 装填     TIM3 (Period 999) … 上限 SOUTEN_PWM_MAX (12V/21V ≒ 57% → 571)
  *   pwm11, pwm12 予備    TIM3 (未使用)
@@ -148,8 +148,6 @@ int rem6 = 0;
 int rem7 = 0;
 int rem8 = 0;
 
-int maxpwm = 1000 * 0.6; // 足回りの PWM 上限 (TIM4 の Period 999 に対して 90%)
-
 // 装填の原点復帰中フラグ。lock6/lock8 で立ち、原点の lock7/lock9 で下りる
 int reset_flag1 = 0; // 装填1
 int reset_flag2 = 0; // 装填2
@@ -169,10 +167,6 @@ uint16_t distance4 = 0;
 // UART7 用（センサー2）
 uint8_t rx_dma_buf7[DMA_BUF_SIZE];
 uint16_t distance7 = 0;
-
-// auto_mode() の PID が出す仮想スティック値
-int auto_ly = 0; // 前後 (壁との距離を保つ)。全自動モードで使用
-int auto_rx = 0; // 旋回 (壁と平行を保つ)。半自動・全自動モードで使用
 
 uint32_t time1 = 0; // 足回りとローラーの 20ms 周期の基準時刻
 uint32_t now = 0;   // ループ先頭の HAL_GetTick()
@@ -300,8 +294,8 @@ int main(void)
     HAL_UART_Transmit(&huart4, startCmd, sizeof(startCmd), HAL_MAX_DELAY);
     HAL_UART_Transmit(&huart7, startCmd, sizeof(startCmd), HAL_MAX_DELAY);
     HAL_Delay(20);
-    HAL_UART_Receive_DMA(&huart4, rx_dma_buf4, DMA_BUF_SIZE);
-    HAL_UART_Receive_DMA(&huart7, rx_dma_buf7, DMA_BUF_SIZE);
+    lidar_start_rx(&huart4);
+    lidar_start_rx(&huart7);
 
   /* USER CODE END 2 */
 
@@ -321,13 +315,14 @@ int main(void)
         sbus();  // スイッチとスティックを読む
         lidar(); // Lidar の距離を更新
 
-        // 足回り・ローラー・装填のランプは 20ms 周期 (auto_mode() の dt もこの周期が前提)
+        // 足回り・ローラー・装填のランプは 20ms 周期
         if (now - time1 >= CONTROL_PERIOD_MS) {
             asimawari();
             roller();
             souten_ramp();
           //printf("PV1:%d PV2:%d PV3:%d PV4:%d pwm5:%d pwm7: %d pwm6:%d pwm8:%d\n",PV1,PV2,PV3,PV4,pwm5,pwm7,pwm6,pwm8);
-        printf("distance4 :%d distance7:%d\n",distance4,distance7);
+        //printf("distance4 :%d distance7:%d\n",distance4,distance7);
+        printf("pwm5%d 6%d7%d8%d\n",pwm5,pwm6,pwm7,pwm8);
             time1 = now;
         }
 
@@ -999,7 +994,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOD, lock5_Pin|d4_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOG, lock1_Pin|lock4_Pin|lock2_Pin|lock3_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOG, lock1_Pin|lock2_Pin|lock4_Pin|lock3_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, d10_Pin|d9_Pin, GPIO_PIN_RESET);
@@ -1046,8 +1041,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : lock1_Pin lock4_Pin lock2_Pin lock3_Pin */
-  GPIO_InitStruct.Pin = lock1_Pin|lock4_Pin|lock2_Pin|lock3_Pin;
+  /*Configure GPIO pins : lock1_Pin lock2_Pin lock4_Pin lock3_Pin */
+  GPIO_InitStruct.Pin = lock1_Pin|lock2_Pin|lock4_Pin|lock3_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -1080,12 +1075,34 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : LOCK_Pin */
+  GPIO_InitStruct.Pin = LOCK_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(LOCK_GPIO_Port, &GPIO_InitStruct);
+
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
+
+/*
+ * UART の受信エラー (パリティ・フレーミング・ノイズ・オーバーラン) で呼ばれる。
+ * DMA 受信中にエラーが起きると HAL は受信を打ち切り、RxEventCallback も呼ばない。
+ * ここで再開しないと、リセットするまで受信が止まったままになる
+ * (SBUS なら青点滅のまま、Lidar なら距離が更新されない)。
+ * フレームの途中から受信を始めた起動直後や、ノイズでよく起きる。
+ */
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
+    if (huart->Instance == UART5) {
+        SBUS_Init();
+    } else {
+        lidar_start_rx(huart); // UART4 / UART7 以外なら何もしない
+    }
+}
+
 /* USER CODE END 4 */
 
  /* MPU Configuration */

@@ -33,6 +33,28 @@ static uint32_t last_lidar_rx4 = 0;
 static uint32_t last_lidar_rx7 = 0;
 
 /*
+ * lidar_start_rx() で受信をやり直すと、DMA はバッファの先頭から書き直す。
+ * lidar() の読み取り位置が前の位置のままだと古いバイトを新しい測定値として読むので、
+ * このフラグを見て読み取り位置を先頭に戻す。lidar_start_rx() は割り込みからも呼ばれる。
+ */
+static volatile uint8_t restarted4 = 0;
+static volatile uint8_t restarted7 = 0;
+
+/*
+ * Lidar の循環 DMA 受信を始める。起動時と、受信エラーで HAL が受信を
+ * 打ち切ったとき (HAL_UART_ErrorCallback) に呼ぶ。UART4 / UART7 以外は何もしない。
+ */
+void lidar_start_rx(UART_HandleTypeDef *huart) {
+    if (huart->Instance == UART4) {
+        restarted4 = 1;
+        HAL_UART_Receive_DMA(&huart4, rx_dma_buf4, DMA_BUF_SIZE);
+    } else if (huart->Instance == UART7) {
+        restarted7 = 1;
+        HAL_UART_Receive_DMA(&huart7, rx_dma_buf7, DMA_BUF_SIZE);
+    }
+}
+
+/*
  * DMAリングバッファから距離フレームを取り出す。
  *
  * ・ヘッダを見つけても4バイト揃っていなければ last_index を進めずに中断し、
@@ -77,6 +99,17 @@ void lidar(void){
     static uint16_t last_index4 = 0;
     static uint16_t last_index7 = 0;
 
+    // 受信をやり直していたら、DMA と同じくバッファの先頭から読む。
+    // フラグを下ろしてから DMA の位置を読むので、その間にやり直されても次回また先頭に戻る
+    if (restarted4) {
+        restarted4 = 0;
+        last_index4 = 0;
+    }
+    if (restarted7) {
+        restarted7 = 0;
+        last_index7 = 0;
+    }
+
     // UART4 (センサー1)
     uint16_t current_index4 = DMA_BUF_SIZE - __HAL_DMA_GET_COUNTER(&hdma_uart4_rx);
     parse_lidar_frames(rx_dma_buf4, &last_index4, current_index4, &distance4, &last_lidar_rx4);
@@ -84,6 +117,24 @@ void lidar(void){
     // UART7 (センサー2)
     uint16_t current_index7 = DMA_BUF_SIZE - __HAL_DMA_GET_COUNTER(&hdma_uart7_rx);
     parse_lidar_frames(rx_dma_buf7, &last_index7, current_index7, &distance7, &last_lidar_rx7);
+}
+
+/*
+ * 途絶えていない Lidar のうち、近い方の距離 (mm) を返す。
+ * 2 台とも途絶えていれば LIDAR_DIST_NONE を返す (近くに何もないとみなす)。
+ * distance4/7 が 0 なのは、起動してからまだ一度も測れていないとき。
+ */
+uint16_t lidar_nearest_mm(void) {
+    uint32_t t = HAL_GetTick();
+    uint16_t nearest = LIDAR_DIST_NONE;
+
+    if (distance4 != 0 && (t - last_lidar_rx4) <= LIDAR_TIMEOUT_MS && distance4 < nearest) {
+        nearest = distance4;
+    }
+    if (distance7 != 0 && (t - last_lidar_rx7) <= LIDAR_TIMEOUT_MS && distance7 < nearest) {
+        nearest = distance7;
+    }
+    return nearest;
 }
 
 /*

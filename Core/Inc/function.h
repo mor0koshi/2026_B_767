@@ -4,7 +4,7 @@
 /*
  * 制御プログラム全体で共有する変数と関数の宣言。
  * 関数の中身は機構ごとのファイルに分けてある:
- *   asimawari.c … 足回りと Lidar PID          roller.c … ローラー
+ *   asimawari.c … 足回り                      roller.c … ローラー
  *   hassya.c    … 発射・電磁弁・装填           limit_sw.c … リミットスイッチの読み取り
  *   output.c    … ピンへの出力と非常時の全停止
  */
@@ -55,14 +55,10 @@ extern int dir1;
 extern int dir2;
 extern int dir3;
 extern int dir4;
-extern int maxpwm;
 
 extern int souten_dir1;
 extern int souten_dir2;
 extern int dummy;
-
-extern int auto_ly;
-extern int auto_rx;
 
 /* 共有変数 (機構ごとのファイルで定義) */
 extern int roller_ready;     /* ローラーが目標速度に達していれば 1 (roller.c の roller() が更新) */
@@ -80,7 +76,6 @@ int _write(int file, char *ptr, int len); /* printf の出力先 (main.c) */
  */
 /* asimawari.c */
 void asimawari(void);       /* 足回り (20ms 周期) */
-void auto_mode(int distance1, int distance2, int reset_flag, int target_dist); /* Lidar PID */
 
 /* roller.c */
 void roller(void);          /* ローラー (20ms 周期) */

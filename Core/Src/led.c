@@ -8,7 +8,6 @@
 /* USER CODE END Header */
 #include "led.h"
 #include "function.h"     /* roller_ready, now, limit_sw, limit_read() */
-#include "lidar_sensor.h" /* lidar_timeout() */
 #include "safety.h"       /* sbus_lost(), can_lost() */
 
 // 起動時の LED テープの色 (0 = 赤 / 1 = 青)。USER ボタンで切り替えられるが、電源を切るとこの色に戻る
@@ -86,17 +85,13 @@ static void color(int color, int sbus_error, int can_error){
  * 消し忘れて赤と青が同時に点く、といった消え残りが起きる。
  *
  * 青点滅 = SBUS断、赤点滅 = CAN断（両方落ちていれば紫点滅になる）、
- * 緑点滅 = Lidar断で自動モードが使えない、緑点灯 = 全て正常。
+ * 緑点灯 = 全て正常。
  */
 static void update_status_led(int sbus_error, int can_error) {
     uint8_t blink = (now / 300) % 2;
-    uint8_t green = 0;
+    uint8_t green = (!sbus_error && !can_error) ? 1 : 0;
     uint8_t blue = sbus_error ? blink : 0;
     uint8_t red = can_error ? blink : 0;
-
-    if (!sbus_error && !can_error) {
-        green = lidar_timeout() ? blink : 1;
-    }
 
     HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, green);
     HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, blue);

@@ -13,20 +13,12 @@ extern "C" {
 /* 測定値が何ms途絶えたらセンサー異常とみなすか (TSD20は200Hz=5ms周期) */
 #define LIDAR_TIMEOUT_MS 100
 
-/*
- * Lidarの取り付け位置オフセット(mm)。センサーの実測値から引いて機体基準に直す。
- * auto_mode に渡す引数は手動モードと全自動モードで必ず揃えること。
- * 揃っていないと prev_error が別条件の値で初期化され、モード切替時にD項が跳ねる。
- * (半自動モードは目標距離に現在距離を渡すので、半自動→全自動の切替では D 項が
- *  1 周期跳ねる。足回りは 1 周期 80 ずつしか変化しないので実害は小さい)
- */
-#define LIDAR_OFFSET4 0
-#define LIDAR_OFFSET7 0
-
-/* 全自動モードで壁から保つ目標距離(mm) */
-#define AUTO_TARGET_DIST_MM 1770
+/* lidar_nearest_mm() が「2 台とも測れていない」ときに返す値 */
+#define LIDAR_DIST_NONE 0xFFFF
 
 /* ペリフェラルハンドル (main.c で定義) */
+extern UART_HandleTypeDef huart4;
+extern UART_HandleTypeDef huart7;
 extern DMA_HandleTypeDef hdma_uart4_rx;
 extern DMA_HandleTypeDef hdma_uart7_rx;
 
@@ -40,6 +32,8 @@ extern uint16_t distance7;
 /* 関数プロトタイプ */
 void lidar(void);
 int lidar_timeout(void);
+uint16_t lidar_nearest_mm(void); /* 途絶えていない Lidar のうち近い方の距離 (mm) */
+void lidar_start_rx(UART_HandleTypeDef *huart); /* 循環 DMA 受信を始める (エラー後のやり直しにも使う) */
 
 #ifdef __cplusplus
 }
