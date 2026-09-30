@@ -87,7 +87,7 @@ motor_outputs();            // PWM・DIR・電磁弁を出力
 | `output.c` | PWM・DIR・電磁弁のピンへの出力（`motor_outputs`）と非常時の全停止（`outputs_all_off`） |
 | `motor_control.c` / `.h` | モーター1個分の制御（`motor_control`、`motor_simple_control`） |
 | `robot_limits.h` | 調整用の定数（足回りの倍率・ローラーの速度・上限値・ランプ時間・タイムアウト時間）をまとめたヘッダ |
-| `safety.c` / `.h` | 安全機能（`safety`）と通信断・非常停止の判定（`sbus_lost` / `can_lost` / `estop_on`。判定は `safety()` で1周に1回） |
+| `safety.c` / `.h` | 安全機能（`safety`）と通信断の判定（`sbus_lost` / `can_lost`。判定は `safety()` で1周に1回） |
 | `led.c` / `.h` | ステータス LED、LED テープ、USER ボタンでの色の切り替え（`led`） |
 | `can_handler.c` / `.h` | CAN の送受信 |
 | `sbus_handler.c` / `.h` | SBUS の受信・デコードとスイッチ/スティックの変換 |
@@ -255,7 +255,7 @@ Lidar のどちらかが `DRIVE_SLOW_DIST_MM`（800mm）以内を測っている
 | 項目 | 内容 |
 |---|---|
 | 配線 | b接点を PD2（ラベル `LOCK`）と GND の間につなぐ。PD2 は内蔵プルアップ |
-| 判定 | 通常は接点が閉じていて Low。非常停止を押すと開いて High = 非常停止中 |
+| 判定 | 通常は接点が閉じていて PD2 が GND につながり Low。非常停止を押すと接点が開いて PD2 がどこにもつながらなくなり、内蔵プルアップで High = 非常停止中 |
 | 線が抜けたとき | プルアップで High になるので、非常停止中として止める |
 | ノイズ除去 | `limit_read()` で 20ms 同じ値が続いたときだけ確定 |
 | 起動時 | 非常停止中として始め、20ms 続けて Low を読んでから解除する |
@@ -264,8 +264,8 @@ Lidar のどちらかが `DRIVE_SLOW_DIST_MM`（800mm）以内を測っている
 | 解除したとき：ローラー | ローラーのスイッチ（`Lmayu2`）が ON のままなら、一度 OFF にするまで回らない（`roller_off()`） |
 | 解除したとき：発射 | 撃つスイッチ（`Rtuno2`）が ON のままなら、一度 OFF にするまで電磁弁も装填の送りも動かない（`hassya_off()`） |
 | 解除したとき：装填の原点復帰 | 途中だった場合は、原点まで戻る（通信断と同じ） |
-| 基板 LED | 赤点灯。SBUS 断・CAN 断のときはそちらの点滅を優先して表示する |
-| LED テープ | 電源が切れているので光らない。USER ボタンでの色の切り替えも受け付けない |
+| 表示 | 基板 LED には出さない。LED テープは電源が切れているので光らない |
+| USER ボタン | 非常停止中も色を切り替えられる（解除するとその色で光る） |
 
 起動時も非常停止中として扱うので、ローラーのスイッチを ON にしたまま電源を入れても、一度 OFF にするまでローラーは回りません。
 
@@ -290,7 +290,6 @@ Lidar のどちらかが `DRIVE_SLOW_DIST_MM`（800mm）以内を測っている
 | LED | 状態 |
 |---|---|
 | 緑点灯 | 正常 |
-| 赤点灯 | 非常停止（LOCK）。SBUS 断・CAN 断のときはそちらを表示する |
 | 青点滅 | SBUS 断 |
 | 赤点滅 | CAN 断 |
 | 紫点滅 | SBUS と CAN の両方が断 |
@@ -416,7 +415,7 @@ Lidar のどちらかが `DRIVE_SLOW_DIST_MM`（800mm）以内を測っている
 | `outputs_all_off()` | output.c | 全 PWM と電磁弁をレジスタ直書きで即 0 にします。`HardFault_Handler` と `Error_Handler` から呼びます。 |
 | `limit_read(sw)` | limit_sw.c | リミットスイッチを読みます。20ms 同じ値が続いたときだけ確定値を更新します。 |
 | `safety()` | safety.c | 異常時の全停止と電磁弁の閉鎖、走行中のローラー制限、装填の上限。 |
-| `sbus_lost()` / `can_lost()` / `estop_on()` | safety.c | SBUS 断 / CAN 断 / 非常停止中なら 1 を返します。判定し直さず、`safety()` がこの周回で判定した結果を返すので、`led()` の表示と止めた状態が食い違いません。 || `led()` | led.c | ステータス LED と LED テープを光らせ、USER ボタンの長押しでチームの色を切り替えます（毎周回、`safety()` の後）。 |
+| `sbus_lost()` / `can_lost()` | safety.c | SBUS 断 / CAN 断なら 1 を返します。判定し直さず、`safety()` がこの周回で判定した結果を返すので、`led()` の表示と止めた状態が食い違いません。 || `led()` | led.c | ステータス LED と LED テープを光らせ、USER ボタンの長押しでチームの色を切り替えます（毎周回、`safety()` の後）。 |
 | `HAL_CAN_RxFifo0MsgPendingCallback` | can_handler.c | CAN 受信割り込み。ID `0x001`、DLC 8以上のフレームを `use_data[]` に格納します。 |
 | `CAN_TX(id)` | can_handler.c | CAN 送信。現在はどこからも呼ばれていません。 |
 | `sbus()` | sbus_handler.c | スイッチとスティックを読みます。 |

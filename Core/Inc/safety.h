@@ -19,7 +19,6 @@ void safety(void);
 /* safety() がこの周回で判定した結果。safety() の後に呼ぶこと (led() が使う) */
 int sbus_lost(void); /* SBUS が使えなければ 1 (タイムアウト / Failsafe / 未受信) */
 int can_lost(void);  /* CAN が CAN_TIMEOUT_MS 以上届いていなければ 1 */
-int estop_on(void);  /* 非常停止 (LOCK) が押されていれば 1 */
 
 #ifdef __cplusplus
 }

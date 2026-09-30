@@ -12,11 +12,9 @@
 #include "sbus_handler.h"  /* SBUS_CH, SBUS_Failsafe, SBUS_LostFrame, last_sbus_rx */
 #include "robot_limits.h"  /* ROLLER_PWM_WHILE_DRIVING, SOUTEN_PWM_MAX, CAN_TIMEOUT_MS */
 
-// safety() がこの周回で判定した通信断 (1 = 断) と非常停止 (1 = 押されている)。
-// led() も同じ判定で表示できるよう、判定は 1 周に 1 回だけにする
+// safety() がこの周回で判定した通信断 (1 = 断)。led() も同じ判定で表示できるよう、判定は 1 周に 1 回だけにする
 static int sbus_error = 1;
 static int can_error = 1;
-static int estop = 1;
 
 /*
  * 非常停止の空き接点 (b 接点) を PD2 (ラベル LOCK、内蔵プルアップ) と GND の間につないでいる。
@@ -59,10 +57,6 @@ int can_lost(void) {
     return can_error;
 }
 
-int estop_on(void) {
-    return estop;
-}
-
 
 static void limit_pwm(int *pwm, int max) {
     if (*pwm > max) {
@@ -83,7 +77,7 @@ static void limit_pwm(int *pwm, int max) {
 void safety(void) {
     sbus_error = check_sbus_lost();
     can_error = check_can_lost();
-    estop = limit_read(&lock_sw);
+    int estop = limit_read(&lock_sw); // 1 = 非常停止中
 
     if (sbus_error || can_error || estop) {
         pwm1 = 0;
