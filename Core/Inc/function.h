@@ -79,6 +79,7 @@ void asimawari(void);       /* 足回り (20ms 周期) */
 
 /* roller.c */
 void roller(void);          /* ローラー (20ms 周期) */
+void roller_off(void);      /* ローラーのスイッチを一度 OFF にするまで回さない。safety() が非常停止で呼ぶ */
 
 /* hassya.c */
 void hassya(void);          /* 撃ってよいか (撃つスイッチの押し直し) を決める (毎周回) */

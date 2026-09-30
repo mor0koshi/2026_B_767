@@ -8,7 +8,7 @@
 /* USER CODE END Header */
 #include "led.h"
 #include "function.h"     /* roller_ready, now, limit_sw, limit_read() */
-#include "safety.h"       /* sbus_lost(), can_lost() */
+#include "safety.h"       /* sbus_lost(), can_lost(), estop_on() */
 
 // 起動時の LED テープの色 (0 = 赤 / 1 = 青)。USER ボタンで切り替えられるが、電源を切るとこの色に戻る
 #define TEAM_COLOR 1
@@ -85,13 +85,15 @@ static void color(int color, int sbus_error, int can_error){
  * 消し忘れて赤と青が同時に点く、といった消え残りが起きる。
  *
  * 青点滅 = SBUS断、赤点滅 = CAN断（両方落ちていれば紫点滅になる）、
- * 緑点灯 = 全て正常。
+ * 赤点灯 = 非常停止 (LOCK)、緑点灯 = 全て正常。
+ * 非常停止は通信が正常なときだけ表示する (SBUS 断・CAN 断の表示を優先する)。
  */
-static void update_status_led(int sbus_error, int can_error) {
+static void update_status_led(int sbus_error, int can_error, int estop) {
     uint8_t blink = (now / 300) % 2;
-    uint8_t green = (!sbus_error && !can_error) ? 1 : 0;
+    int link_ok = !sbus_error && !can_error;
+    uint8_t green = (link_ok && !estop) ? 1 : 0;
     uint8_t blue = sbus_error ? blink : 0;
-    uint8_t red = can_error ? blink : 0;
+    uint8_t red = can_error ? blink : (link_ok && estop);
 
     HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, green);
     HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, blue);
@@ -108,7 +110,10 @@ void led(void) {
     int sbus_error = sbus_lost();
     int can_error = can_lost();
 
-    update_status_led(sbus_error, can_error);
-    update_team_color(sbus_error || can_error);
+    int estop = estop_on();
+
+    // 非常停止の間は LED テープに電源が来ないので、テープの表示は変えない (色の切り替えも受け付けない)
+    update_status_led(sbus_error, can_error, estop);
+    update_team_color(sbus_error || can_error || estop);
     color(team_color, sbus_error, can_error);
 }

@@ -12,9 +12,20 @@
 #include "sbus_handler.h"  /* SBUS_CH, SBUS_Failsafe, SBUS_LostFrame, last_sbus_rx */
 #include "robot_limits.h"  /* ROLLER_PWM_WHILE_DRIVING, SOUTEN_PWM_MAX, CAN_TIMEOUT_MS */
 
-// safety() がこの周回で判定した通信断 (1 = 断)。led() も同じ判定で表示できるよう、判定は 1 周に 1 回だけにする
+// safety() がこの周回で判定した通信断 (1 = 断) と非常停止 (1 = 押されている)。
+// led() も同じ判定で表示できるよう、判定は 1 周に 1 回だけにする
 static int sbus_error = 1;
 static int can_error = 1;
+static int estop = 1;
+
+/*
+ * 非常停止の空き接点 (b 接点) を PD2 (ラベル LOCK、内蔵プルアップ) と GND の間につないでいる。
+ *   通常 … 接点が閉じていて Low
+ *   非常停止を押している … 接点が開いて High
+ * 線が抜けても High になるので、非常停止中として止める。
+ * 起動時は「非常停止中」(1) から始め、20ms 続けて Low を読んでから解除する (limit_read)。
+ */
+static limit_sw lock_sw = LIMIT_SW_INIT(LOCK_GPIO_Port, LOCK_Pin);
 
 /*
  * SBUS が使えない状態なら 1 を返す。次の 1, 2, 4 のどれかで判定する (3 は使わない)。
@@ -48,6 +59,10 @@ int can_lost(void) {
     return can_error;
 }
 
+int estop_on(void) {
+    return estop;
+}
+
 
 static void limit_pwm(int *pwm, int max) {
     if (*pwm > max) {
@@ -57,8 +72,10 @@ static void limit_pwm(int *pwm, int max) {
 
 /*
  * 安全機能。必ず PWM を出力する直前に呼ぶこと。
- *   ・SBUS か CAN が使えなければ全モーターを止め、電磁弁を閉じ、撃つスイッチを離すまで撃たない
- *     (原点復帰の途中だった装填は、通信が戻ると原点まで戻る)
+ *   ・SBUS か CAN が使えないか、非常停止 (LOCK) が押されていれば、全モーターを止め、
+ *     電磁弁を閉じ、撃つスイッチを離すまで撃たない
+ *     (原点復帰の途中だった装填は、元に戻ると原点まで戻る)
+ *   ・非常停止のときは、ローラーのスイッチも一度 OFF にするまで回さない
  *   ・足回りが回っている間はローラーの PWM を頭打ちにする
  *   ・装填 (12V 用の RS-555) の PWM を SOUTEN_PWM_MAX で頭打ちにする
  * LED の表示は led() (led.c) が行う。
@@ -66,8 +83,9 @@ static void limit_pwm(int *pwm, int max) {
 void safety(void) {
     sbus_error = check_sbus_lost();
     can_error = check_can_lost();
+    estop = limit_read(&lock_sw);
 
-    if (sbus_error || can_error) {
+    if (sbus_error || can_error || estop) {
         pwm1 = 0;
         pwm2 = 0;
         pwm3 = 0;
@@ -86,6 +104,12 @@ void safety(void) {
         // CAN 断だとエンコーダ値 (PV) が古いまま固まり、roller() が「到達」と誤判定しうる。
         // モーターを止めている間は発射準備完了ではないので、フラグを下ろしておく
         roller_ready = 0;
+    }
+
+    // 非常停止を解除したとき、ローラーのスイッチが ON のままだと急に回り出すので、一度 OFF にさせる
+    // (撃つスイッチは hassya_off() が同じようにしている)
+    if (estop) {
+        roller_off();
     }
 
     // ローラーと足回りが同時に全力で回らないようにする（電源の取り合い対策）。

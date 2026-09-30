@@ -25,7 +25,7 @@
 #define DRIVE_PWM_MAX 700
 // 20ms ごとに PWM を目標値へ近づける量。大きいほど加速・減速が速い (40 なら 0 → 700 が 360ms)
 #define DRIVE_STEP 40
-#define DRIVE_SLOW_DIST_MM 500 // Lidar のどちらかがこの距離 (mm) 以下なら足回りを遅くする
+#define DRIVE_SLOW_DIST_MM 800 // Lidar のどちらかがこの距離 (mm) 以下なら足回りを遅くする
 #define DRIVE_SLOW_PERCENT 40  // 遅くするときの倍率 (%)。40 = 0.4 倍
 
 /* ---- RS-555 (装填1 pwm9 / 装填2 pwm10、TIM3) ---- */
