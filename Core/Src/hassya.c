@@ -18,13 +18,15 @@
 static int shoot = 0;
 
 // Rtuno2 を一度離すと 1、hassya_off() や、押したままのスイッチの切り替えで 0 になる。
-// 起動時は 0 なので、撃つスイッチを ON にしたまま電源を入れても撃たない
+// 起動時は 0。SBUS が正常なときに OFF を読むまで 1 にならないので、
+// 撃つスイッチを ON にしたまま電源を入れても撃たない
 static int shoot_armed = 0;
 
 /*
  * 撃ってよいか (shoot) を決める。毎周回、souten() と denziben() の前に呼ぶ。
  *
  * 撃つには Rtuno2 を一度離してから押す必要がある。次のときは、Rtuno2 を離すまで撃たない。
+ * 「離した」は SBUS が正常なとき (sbus_valid) に OFF を読んだことで判定する。
  *   ・起動時
  *   ・通信断 (safety() が hassya_off() を呼ぶ)
  *   ・Rtuno2 を押したまま、撃つ相手を決めるスイッチ (Lmayu1 / Lmayu2 / Rmayu2) が変わったとき
@@ -38,7 +40,7 @@ void hassya(void) {
     static int prev_Rmayu2 = 0;
     int target_changed = Lmayu1 != prev_Lmayu1 || Lmayu2 != prev_Lmayu2 || Rmayu2 != prev_Rmayu2;
 
-    if (Rtuno2 != 1) {
+    if (Rtuno2 != 1 && sbus_valid) {
         shoot_armed = 1;
     } else if (prev_Rtuno2 == 1 && target_changed) {
         shoot_armed = 0;
@@ -88,6 +90,9 @@ uint8_t denziben_on(int n) {
 // souten() が毎周回決め、souten_ramp() が 20ms ごとに pwm9 / pwm10 をこの値へ近づける
 static int souten1_target = 0;
 static int souten2_target = 0;
+
+// 1 のとき、撃つスイッチを押すまで装填を動かさない (原点復帰も)。非常停止の間 souten_hold() が 1 にする
+static int souten_held = 0;
 
 // 逆転リセットのリミットスイッチ。ノイズ除去して読む (limit_read)
 static limit_sw sw_lock6 = LIMIT_SW_INIT(lock6_GPIO_Port, lock6_Pin); // 装填1 リセット開始
@@ -190,6 +195,7 @@ static int souten_target(int dir) {
  *
  * 原点復帰中は、上の結果によらず逆転させる。
  * 同じ向きに SOUTEN_TIMEOUT_MS 以上回り続けたら止め、撃つスイッチを押し直すまで回さない。
+ * 非常停止の後も、撃つスイッチを押すまで回さない (押すと、途中だった原点復帰が再開する)。
  */
 void souten(void) {
     static int prev_shoot = 0;
@@ -215,6 +221,15 @@ void souten(void) {
     }
     if (reset_flag2 == 1) {
         souten2_target = souten_target(0);
+    }
+
+    // 非常停止の後は、撃つスイッチを押すまで止めておく。復帰フラグは残すので、押すと原点復帰が再開する
+    if (restart) {
+        souten_held = 0;
+    }
+    if (souten_held) {
+        souten1_target = 0;
+        souten2_target = 0;
     }
 
     souten_timeout(&timer1, &souten1_target, &reset_flag1, &pwm9, restart);
@@ -252,4 +267,12 @@ void hassya_off(void) {
     shoot_armed = 0;
     timer1.target = 0;
     timer2.target = 0;
+}
+
+/*
+ * 撃つスイッチを押すまで、装填を動かさない (原点復帰も)。safety() が非常停止の間に呼ぶ。
+ * 非常停止の間に装填へ手を入れていることがあるので、解除しただけで原点復帰が勝手に始まらないようにする。
+ */
+void souten_hold(void) {
+    souten_held = 1;
 }

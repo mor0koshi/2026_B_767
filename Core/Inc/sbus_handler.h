@@ -20,6 +20,7 @@ extern volatile uint16_t SBUS_CH[16];
 extern uint8_t SBUS_Failsafe;
 extern uint8_t SBUS_LostFrame;
 extern uint32_t last_sbus_rx;
+extern int sbus_valid; /* sbus() が読んだ値が正常なフレームのものなら 1 (sbus_handler.c) */
 
 /* スティック・スイッチ加工後の値 (main.c で定義) */
 extern int rx;

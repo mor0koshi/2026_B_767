@@ -113,17 +113,51 @@ int process_stick(int ch_value) {
     return mapped;
 }
 
-// スイッチとスティックを読む。足回りへの混合は asimawari() (asimawari.c) で行う
-void sbus(void){
-    Lmayu1 = get_switch_state2(SBUS_CH[4]);
-    Lmayu2 = get_switch_state2(SBUS_CH[5]);
-    Rmayu1 = get_switch_state3(SBUS_CH[6]);
-    Rmayu2 = get_switch_state2(SBUS_CH[7]);
-    Ltuno1 = get_switch_state3(SBUS_CH[8]);
-    Rtuno2 = get_switch_state2(SBUS_CH[9]);
+// sbus() が読んだスイッチ・スティックの値が、正常なフレームのものなら 1
+int sbus_valid = 0;
 
-    rx = process_stick(SBUS_CH[0]);
-    ly = process_stick(SBUS_CH[1]);
-    ry = process_stick(SBUS_CH[2]);
-    lx = process_stick(SBUS_CH[3]);
+/*
+ * スイッチとスティックを読み、その値が使えるか (sbus_valid) も判定する。
+ * 足回りへの混合は asimawari() (asimawari.c) で行う。
+ *
+ * sbus_valid が 0 になるのは次のとき (safety() はこれで SBUS 断と判定する)。
+ *   1. last_sbus_rx のタイムアウト … 受信が完全に途絶えた場合。
+ *      SBUS_CH も SBUS_LostFrame もフレームが来たときしか更新されないため、
+ *      コネクタが抜けると古い値のまま固まる。これが無いと直前のスティック
+ *      指令のまま走り続けてしまう。
+ *   2. SBUS_Failsafe … 「受信機が送信機を見失った」決定的な信号。
+ *      送信機の電源を切っても受信機は正常なフレームを送り続け、このビット
+ *      だけを立てるので、1 でも 4 でも捕まえられない。
+ *   3. SBUS_LostFrame … 単発のフレーム落ち。ノイズで急停止するので判定に使わない。
+ *   4. SBUS_CH[0] == 0 … 起動直後 (まだ 1 フレームも来ていない)。
+ *      このときスイッチは全部 0 (OFF) と読めてしまう。
+ *
+ * スイッチの押し直し (hassya()、roller()) は sbus_valid が 1 のときだけ「OFF にした」とみなすこと。
+ * 起動直後やフェイルセーフ中の値を OFF と読むと、スイッチを ON にしたままでも押し直し待ちが解けてしまう。
+ */
+void sbus(void){
+    uint16_t ch[10];
+
+    // 途中で受信割り込みが入って別のフレームの値が混ざらないよう、まとめて写す
+    __disable_irq();
+    for (int i = 0; i < 10; i++) {
+        ch[i] = SBUS_CH[i];
+    }
+    uint8_t failsafe = SBUS_Failsafe;
+    uint32_t last_rx = last_sbus_rx;
+    __enable_irq();
+
+    sbus_valid = HAL_GetTick() - last_rx <= SBUS_TIMEOUT_MS && !failsafe && ch[0] != 0;
+
+    Lmayu1 = get_switch_state2(ch[4]);
+    Lmayu2 = get_switch_state2(ch[5]);
+    Rmayu1 = get_switch_state3(ch[6]);
+    Rmayu2 = get_switch_state2(ch[7]);
+    Ltuno1 = get_switch_state3(ch[8]);
+    Rtuno2 = get_switch_state2(ch[9]);
+
+    rx = process_stick(ch[0]);
+    ly = process_stick(ch[1]);
+    ry = process_stick(ch[2]);
+    lx = process_stick(ch[3]);
 }

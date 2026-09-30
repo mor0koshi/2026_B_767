@@ -79,7 +79,7 @@ void asimawari(void);       /* 足回り (20ms 周期) */
 
 /* roller.c */
 void roller(void);          /* ローラー (20ms 周期) */
-void roller_off(void);      /* ローラーのスイッチを一度 OFF にするまで回さない。safety() が非常停止で呼ぶ */
+void roller_off(void);      /* ローラーのスイッチを一度 OFF にするまで回さない。safety() が非常停止・通信断で呼ぶ */
 
 /* hassya.c */
 void hassya(void);          /* 撃ってよいか (撃つスイッチの押し直し) を決める (毎周回) */
@@ -88,6 +88,7 @@ void denziben(void);        /* 電磁弁の指令 (毎周回) */
 uint8_t denziben_on(int n); /* 電磁弁 n (1 = lock1 / 2 = lock2) を開くなら 1。motor_outputs() が読む */
 void souten(void);          /* 装填モーターの指令 (毎周回) */
 void souten_ramp(void);     /* 装填モーターの pwm をランプで目標へ近づける (20ms 周期) */
+void souten_hold(void);     /* 撃つスイッチを押すまで装填を動かさない (原点復帰も)。safety() が非常停止で呼ぶ */
 
 /* output.c */
 void motor_outputs(void);   /* PWM と DIR と電磁弁の出力。safety() の後に呼ぶ */

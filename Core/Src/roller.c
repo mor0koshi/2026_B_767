@@ -19,8 +19,9 @@
 static const int ROLLER_STOP = 0;
 
 // 0 のとき、ローラーのスイッチ (Lmayu2) を一度 OFF にするまで回さない。
-// 非常停止 (LOCK) の間 roller_off() が 0 にする。解除したときスイッチが ON のままでも急に回り出さないため
-static int roller_armed = 1;
+// 非常停止・通信断の間 roller_off() が 0 にする。元に戻ったときスイッチが ON のままでも急に回り出さないため。
+// 起動時も 0 なので、スイッチを ON にしたまま電源を入れても回らない
+static int roller_armed = 0;
 
 // 回しているローラーが目標速度に達していれば 1。roller() が立て、led.c の color() が LED テープを点滅させる
 int roller_ready = 0;
@@ -58,10 +59,11 @@ static int roller_at_speed(int speed, int PV) {
  *
  * Lmayu2 == 1 のときだけ回す。上下は Lmayu1 で切り替えるので同時には回らない。
  * 止めるローラーも目標 0 で速度制御し、緩やかに減速させる。
- * 非常停止 (LOCK) の後は、Lmayu2 を一度 OFF にするまで回さない。
+ * 起動時と、非常停止・通信断の後は、Lmayu2 を一度 OFF にするまで回さない。
+ * 「OFF にした」は SBUS が正常なとき (sbus_valid) に OFF を読んだことで判定する。
  */
 void roller(void) {
-    if (Lmayu2 != 1) {
+    if (Lmayu2 != 1 && sbus_valid) {
         roller_armed = 1;
     }
     int roller_on = (Lmayu2 == 1) && roller_armed;
@@ -80,7 +82,7 @@ void roller(void) {
 
 /*
  * ローラーのスイッチ (Lmayu2) を一度 OFF にするまで、ローラーを回さない。
- * safety() が非常停止 (LOCK) の間に呼ぶ。PWM は safety() が 0 にする。
+ * safety() が非常停止・SBUS 断・CAN 断の間に呼ぶ。PWM は safety() が 0 にする。
  */
 void roller_off(void) {
     roller_armed = 0;

@@ -63,4 +63,10 @@
 // 最後に CAN を受信してから、何 ms 経ったら CAN 断とみなすか
 #define CAN_TIMEOUT_MS 100
 
+/* ---- 非常停止 (LOCK) ---- */
+// High がこの時間 (ms) 続いたら非常停止とみなす。モーターのノイズ (瞬間的な High) で止まらないための最小限の時間
+#define ESTOP_PRESS_MS 2
+// Low がこの時間 (ms) 続いたら非常停止の解除とみなす。途中で 1 回でも High を読んだら測り直す
+#define ESTOP_RELEASE_MS 20
+
 #endif /* __ROBOT_LIMITS_H */
